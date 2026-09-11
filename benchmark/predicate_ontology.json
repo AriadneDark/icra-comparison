@@ -1,0 +1,17 @@
+{
+  "holding": ["hold", "holds", "grasp", "grasping", "grips", "gripping", "carrying"],
+  "touching": ["touch", "touches", "in contact with", "contacting"],
+  "on": ["on top of", "supported by", "resting on", "sits on", "placed on"],
+  "inside": ["in", "contained in", "within"],
+  "above": ["over", "on top of without contact"],
+  "near": ["next to", "close to", "beside"],
+  "approaching": ["moving toward", "moves toward", "moving towards", "approaches"],
+  "moving_away": ["moving away", "moves away", "receding from"],
+  "placing_on": ["place on", "places on", "put on", "puts on", "placing onto"],
+  "placing_in": ["place in", "places in", "put inside", "puts inside", "inserting into"],
+  "removing_from": ["remove from", "removes from", "taking from", "lifting from"],
+  "releasing": ["release", "releases", "letting go of"],
+  "opening": ["open", "opens"],
+  "closing": ["close", "closes"],
+  "moving": ["move", "moves", "transporting"]
+}

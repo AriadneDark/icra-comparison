@@ -1,0 +1,9 @@
+.git
+**/.git
+**/__pycache__
+**/*.pyc
+our_results
+baseline_runs
+benchmark/.cache
+benchmark/docker.env
+sharerobot_sg/unified_scene_graph_pipeline/third_party

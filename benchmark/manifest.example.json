@@ -1,0 +1,19 @@
+{
+  "schema_version": "benchmark_manifest_v1",
+  "name": "example_goal_role_benchmark",
+  "episode_count": 2,
+  "episodes": [
+    {
+      "relative_path": "dataset_name/episode_001",
+      "dataset_name": "dataset_name",
+      "planning_goal": "pick up the red cup and place it on the tray",
+      "frame_count": 30
+    },
+    {
+      "relative_path": "dataset_name/episode_002",
+      "dataset_name": "dataset_name",
+      "planning_goal": "move the blue block from the table into the bowl",
+      "frame_count": 30
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+# Local agent/editor state
+.agents/
+.codex/
+.vscode/
+.idea/
+
+# Secrets and machine-specific configuration
+.env
+**/.env
+benchmark/docker.env
+*.key
+*.pem
+
+# Python/build state
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.venv/
+
+# Downloaded model caches and weights
+**/.cache/
+**/checkpoints/
+**/models/
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+
+# Generated benchmark inputs, outputs, logs and visualizations
+baseline_runs/
+our_results/
+comparisons/
+comparisons.zip
+*.log
+
+# Large local datasets
+datasets/
+data/

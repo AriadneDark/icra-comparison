@@ -1,0 +1,92 @@
+version: 1
+name: qwen30-vggt-omega-da3-metric-counting-size
+
+input:
+  mode: auto
+  fps: 10.0
+
+hardware:
+  gpus: [0]
+
+dataset:
+  execution: sequential
+
+keyframes:
+  fraction: 0.001
+  min_number: 1
+  max_number: 30
+  required_uniform_vqa_frames: 30
+  additional_maxinfo_frames: 0
+
+grounding:
+  backend: qwen
+
+reconstruction:
+  enabled: true
+  # The repository's VGGT-Long integration uses VGGT-Omega as its base model.
+  method: vggt-long
+  vggt_long_config: configs/ch100_ov30.yaml
+
+metric_scale:
+  enabled: true
+  # Run the metric DA3 branch and scale the complete VGGT-Omega
+  # reconstruction, including camera translations, to metres.
+  source: da3
+  strategy: conf_top10_lsq
+
+segmentation:
+  enabled: true
+  prompt_source: qwen30-boxes
+  batch_size: 1
+  max_objects: 64
+  compile: false
+  offload_video_to_cpu: false
+  score_threshold: 0.2
+
+tracking:
+  enabled: true
+  kind: global
+  preset: indoor
+  min_free_gpu_mb: 0
+  qwen_verifier: true
+  qwen_verifier_workers: 2
+  qwen_verifier_frames_per_track: 3
+
+vlm_inference:
+  enabled: api
+  api:
+    endpoint: REPLACE_WITH_OPENAI_COMPATIBLE_CHAT_COMPLETIONS_URL
+    model: Qwen/Qwen3.8-27B
+    request_timeout: 900
+    retries: 2
+    image_compression:
+      enabled: true
+      max_side_pixels: 1024
+      jpeg_quality: 85
+  local:
+    endpoint: http://localhost:8000/v1/chat/completions
+    model: Qwen/Qwen3.6-27B
+    port: 8000
+    timeout: 900
+    request_timeout: 900
+    retries: 2
+    keep_running: true
+    async_scheduling: false
+
+verification:
+  objects:
+    qwen_based:
+      enabled: true
+      allow_label_suggestions: true
+    geometric:
+      enabled: true
+      vertical_axis: perspective-fields
+  relations:
+    qwen_based:
+      enabled: false
+    geometric:
+      enabled: false
+
+relations:
+  enabled: false
+  sceneverse: false

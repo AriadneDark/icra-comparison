@@ -1,0 +1,10 @@
+.venv*
+
+output_captions*
+
+.hf-cache
+
+# Inputs, logs and generated captions
+inputs
+logs
+captions

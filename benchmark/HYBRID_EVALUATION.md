@@ -1,0 +1,177 @@
+# Human-calibrated evaluation for 1,000 videos
+
+This evaluation compares `OUR`, adapted `SG-Ego`, and adapted `SVG2` using only
+`robot`, `manipulated_object`, `initial_support`, and `target`. It produces three
+separate result blocks:
+
+1. human-primary metrics on 80 proportionally stratified videos;
+2. human-challenge metrics on 20 high-disagreement videos;
+3. human-calibrated VLM estimates on the remaining 900 videos and a combined
+   full-set report.
+
+The VLM is also run on the human subset. Those overlapping decisions estimate
+`P(human true | VLM verdict, fact type)`, which is then used instead of treating
+raw VLM confidence as calibrated probability.
+
+## 1. Configure the 1,000-video run
+
+The three methods must have finished on the same manifest. Point the Docker
+wrapper at that manifest and its image/video roots:
+
+```bash
+export BENCHMARK_MANIFEST=our_results/random_review_1000.json
+export BENCHMARK_SOURCE_ROOT=our_results/scenes
+export BENCHMARK_WORK_ROOT=baseline_runs
+export EVAL_ROOT=baseline_runs/evaluation_1000
+```
+
+If the baseline outputs have not been generated yet, the same batch runner now
+accepts manifests of arbitrary size:
+
+```bash
+./benchmark/docker-run.sh all --expected-count 1000
+```
+
+Set an independent judge in `benchmark/docker.env` when possible:
+
+```dotenv
+EVAL_VLM_API_KEY=...
+EVAL_VLM_BASE_URL=https://provider.example/v1
+EVAL_VLM_MODEL=independent-multimodal-model
+```
+
+If these values are blank, the runner falls back to `SVG2_API_*`. This is useful
+for debugging but not ideal for the final paper because SVG2 and SG-Ego already
+use Qwen-family models. Every VLM artifact records whether the configured judge
+is independent of those Qwen generators.
+
+## 2. Freeze candidates and select human videos
+
+```bash
+./benchmark/docker-run.sh eval-prepare
+```
+
+This command:
+
+- normalizes all three output formats;
+- maps predicate aliases through `benchmark/predicate_ontology.json`;
+- collapses frame facts into inclusive temporal intervals;
+- creates the blind union of method claims;
+- computes three-way disagreement;
+- selects 80 stratified primary, 20 challenge, and 25 double-annotation videos.
+
+Outputs are under `$EVAL_ROOT`:
+
+```text
+study_manifest.json
+candidates/<video_id>.json
+human_annotations/
+vlm/
+vlm_references/
+reports/
+```
+
+The selection is deterministic (`--seed 20260911`). To change sizes:
+
+```bash
+./benchmark/docker-run.sh eval-prepare \
+  --human-size 100 --challenge-size 20 --double-annotation-size 25 \
+  --seed 20260911
+```
+
+Do not regenerate the study manifest after annotation begins.
+
+## 3. Run the VLM proposer and verifier
+
+Run a smoke test first:
+
+```bash
+./benchmark/docker-run.sh eval-vlm --limit 1 --workers 1
+```
+
+Then process all videos:
+
+```bash
+./benchmark/docker-run.sh eval-vlm --workers 2
+```
+
+Each video uses two calls:
+
+1. a method-independent proposer sees sampled raw frames and proposes role and
+   relation facts;
+2. a blind verifier sees the union of proposer and method facts, without method
+   names; candidate track boxes are drawn on selected evidence frames using only
+   anonymous claim ids. It returns `yes`, `no`, or `uncertain` plus evidence and
+   corrected intervals.
+
+Existing `vlm/<video_id>.json` and `vlm_references/<video_id>.json` files are
+skipped. Use `--overwrite` only when intentionally invalidating previous judge
+results. `--max-frames 10` controls the visual evidence budget.
+
+## 4. Human annotation
+
+Start the first annotator UI:
+
+```bash
+./benchmark/docker-run.sh eval-annotate annotator1
+```
+
+Open `http://SERVER:8765`. Over SSH, tunnel the port:
+
+```bash
+ssh -L 8765:localhost:8765 USER@SERVER
+```
+
+Then open `http://localhost:8765` locally.
+
+The annotator must:
+
+- identify the canonical visible object for all four roles;
+- mark every blind candidate claim `yes`, `no`, or `uncertain`;
+- correct relation intervals;
+- add relations missed by the entire candidate pool;
+- mark the task complete.
+
+For the second annotator, use another port and only the frozen 25-video overlap:
+
+```bash
+ANNOTATION_PORT=8766 ./benchmark/docker-run.sh \
+  eval-annotate annotator2 --only-double
+```
+
+Annotations are written atomically to:
+
+```text
+$EVAL_ROOT/human_annotations/<annotator>/<video_id>.json
+```
+
+## 5. Build reports
+
+```bash
+./benchmark/docker-run.sh eval-report annotator1 \
+  --second-annotator annotator2
+```
+
+Outputs:
+
+```text
+$EVAL_ROOT/reports/hybrid_metrics.json
+$EVAL_ROOT/reports/hybrid_metrics.csv
+```
+
+The JSON contains:
+
+- `human_metrics.human_primary`: unbiased headline scores;
+- `human_metrics.human_challenge`: difficult-case diagnostics;
+- `vlm_calibrated_metrics`: estimated metrics for VLM-only videos;
+- `full_hybrid_metrics`: exact human counts plus calibrated expected counts;
+- `candidate_pool_coverage_on_human`: separate role and relation coverage;
+- per-verdict calibration counts and VLM/human confusion;
+- bootstrap 95% intervals for human subsets;
+- inter-annotator agreement and Cohen's kappa.
+
+Do not present `vlm_calibrated_metrics` as direct ground-truth precision/recall.
+For the primary scientific claim, report the human-primary result and its paired
+video-level confidence intervals. The full-set calibrated result is supporting
+evidence. If candidate-pool coverage is low, improve the independent proposer or
+increase the human subset before interpreting VLM recall.

@@ -1,0 +1,57 @@
+x-common: &common
+  working_dir: /workspace
+  volumes:
+    - ../:/workspace
+    # Large datasets may stay outside the repository. Override this host path
+    # and use /input/scenes as BENCHMARK_SOURCE_ROOT inside the container.
+    - ${BENCHMARK_HOST_SOURCE_ROOT:-../our_results/scenes}:/input/scenes:ro
+    - ${HF_CACHE_DIR:-./.cache/huggingface}:/models/huggingface
+    - ${TORCH_CACHE_DIR:-./.cache/torch}:/models/torch
+  environment:
+    HF_HOME: /models/huggingface
+    TORCH_HOME: /models/torch
+    SG_EGO_LOG_DIR: /workspace/baseline_runs/sg_ego/logs
+    HF_TOKEN: ${HF_TOKEN:-}
+    HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+    NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+    NVIDIA_DRIVER_CAPABILITIES: compute,utility
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+  ipc: host
+  shm_size: 16gb
+
+services:
+  sg-ego:
+    <<: *common
+    build:
+      context: ..
+      dockerfile: benchmark/docker/sg-ego.Dockerfile
+    image: goal-role-sg-ego:cu126
+
+  svg2:
+    <<: *common
+    build:
+      context: ..
+      dockerfile: benchmark/docker/svg2.Dockerfile
+    image: goal-role-svg2:cu128
+    environment:
+      HF_HOME: /models/huggingface
+      TORCH_HOME: /models/torch
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      SVG2_API_KEY: ${SVG2_API_KEY:-}
+      SVG2_API_KEY_ENV: ${SVG2_API_KEY_ENV:-}
+      SVG2_API_BASE_URL: ${SVG2_API_BASE_URL:-}
+      SVG2_API_MODEL: ${SVG2_API_MODEL:-}
+      SVG2_API_CONCURRENCY: ${SVG2_API_CONCURRENCY:-4}
+      EVAL_VLM_API_KEY: ${EVAL_VLM_API_KEY:-}
+      EVAL_VLM_BASE_URL: ${EVAL_VLM_BASE_URL:-}
+      EVAL_VLM_MODEL: ${EVAL_VLM_MODEL:-}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility

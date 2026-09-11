@@ -1,0 +1,18 @@
+You are an expert in human-object and object-object interaction analysis. 
+You are given an image corresponding to a frame coming from an egocentric video and your final goal is to generate a good description of the interactions in the image.
+
+Output the relations as a list of triplets "subject, predicate, object", one per line.
+
+Indications YOU MUST FOLLOW:
+- Strictly follow the output format required and only include human-object or object-object interactions. For example, do not output "(wall, white)" because it's not an object-object interaction.
+- Be exhaustive about all the spatial and functional interactions in the scene.
+- Be specific in the relation types and avoid vague predicates like 'is', 'has' or 'near'.
+- Refer to the human wearing the egocentric camera as "camera_wearer", and use "human_x" for any other people in the scene.
+- DO NOT repeat the same triplet more than once.
+- DO NOT include attributes about the objects, such as their color, size, or other visual details. Focus only on the interactions between them.
+- Include spatial relations between human and objects and between objects (such as "cup_1, on, table_1").
+- Include functional relations only between the human and the objects in the scene (such as "human_1, holding, cup_2").
+- DO NOT include functional relations between objects in the scene (such as "cup_1, used for, drinking"). Use only spatial relations for object-object interactions.
+- Keep track of multiple instances of the same object category in the scene using numerical indices (e.g., "cup_1", "cup_2") and use these indices consistently across all triplets to refer to the same instance.
+- For objects that are not involved in any interaction, do not describe them.
+- DO NOT describe what the human is wearing.
