@@ -313,6 +313,18 @@ export EVAL_ROOT="$BENCHMARK_WORK_ROOT/evaluation_1000"
 Настоящий API-ключ локальному judge не нужен. Результаты resumable: без
 `--overwrite` уже готовые JSON пропускаются.
 
+Чтобы измерить ровно один репрезентативный VLM-запрос без подготовки разметки и
+`study_manifest.json`:
+
+```bash
+./benchmark/docker-run.sh judge-benchmark \
+  --video /workspace/baseline_runs/videos/28_viola__episode_15.mp4 \
+  --goal "Pick up the object and place it on the target"
+```
+
+Команда выбирает 10 кадров и печатает `request_seconds` для самого inference,
+а также `preprocessing_seconds` и полное `total_seconds`.
+
 Запустить интерфейс первого аннотатора:
 
 ```bash

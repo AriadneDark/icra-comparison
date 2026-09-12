@@ -103,6 +103,20 @@ the server keeps running. Check its model endpoint and run one video:
 ./benchmark/docker-run.sh eval-vlm-local --limit 1 --workers 1
 ```
 
+To time exactly one representative proposer request without creating a study or
+annotations, point the standalone benchmark at an MP4 or a frame directory:
+
+```bash
+./benchmark/docker-run.sh judge-benchmark \
+  --video /workspace/baseline_runs/videos/28_viola__episode_15.mp4 \
+  --goal "Pick up the object and place it on the target"
+```
+
+It samples 10 frames and reports model discovery, preprocessing, API inference,
+total latency, token counts, and output tokens/second. The first request may
+include CUDA graph/kernel warm-up; repeat the command to measure warm latency.
+Each invocation still sends exactly one chat-completions request.
+
 Then process all videos:
 
 ```bash

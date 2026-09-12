@@ -47,6 +47,7 @@ usage() {
     "  judge-start    Start local Gemma 4 31B VLM server" \
     "  judge-status   Show local judge container status" \
     "  judge-smoke    Check the local judge OpenAI-compatible endpoint" \
+    "  judge-benchmark Time exactly one multimodal video request" \
     "  judge-logs     Follow local judge startup/request logs" \
     "  judge-stop     Stop local judge and release the GPU" \
     "  eval-vlm-local Evaluate through the running local Gemma judge" \
@@ -157,6 +158,10 @@ case "$command" in
   judge-smoke)
     "${compose[@]}" exec -T gemma-judge python3 -c \
       'import json, urllib.request; print(json.load(urllib.request.urlopen("http://127.0.0.1:8000/v1/models", timeout=30)))'
+    ;;
+  judge-benchmark)
+    "${compose[@]}" "${container_run[@]}" svg2 python \
+      benchmark/benchmark_local_vlm.py "$@"
     ;;
   judge-logs)
     "${compose[@]}" logs -f gemma-judge

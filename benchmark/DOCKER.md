@@ -202,6 +202,20 @@ service. Then run:
 ./benchmark/docker-run.sh judge-stop
 ```
 
+No study or annotations are needed to time one production-shaped proposer
+request. The input may be an MP4 or a directory of ordered image frames:
+
+```bash
+./benchmark/docker-run.sh judge-benchmark \
+  --video /workspace/baseline_runs/videos/28_viola__episode_15.mp4 \
+  --goal "Pick up the object and place it on the target"
+```
+
+The JSON printed by this command separates `request_seconds` from frame/JPEG
+preprocessing and reports token throughput. It sends exactly one request with
+10 uniformly sampled frames; use `--frames N` to change that evidence budget.
+Run it twice if both cold-start and warmed-up request latency are needed.
+
 No real API key is used. The model cache is written as the invoking host user.
 The evaluation runner discovers the model id from `/v1/models` and records it
 in every result. Do not use more than one evaluation worker with this BF16 model
