@@ -139,7 +139,9 @@ Each video uses two calls:
 2. a blind verifier sees the union of proposer and method facts, without method
    names; candidate track boxes are drawn on selected evidence frames using only
    anonymous claim ids. For every claim it returns `yes`, `no`, or `uncertain`
-   independently at every displayed frame.
+   independently at every displayed frame. On the wire these values use compact
+   `y/n/u` arrays aligned with the displayed frame list; artifacts expand them
+   back into explicit per-frame verdicts.
 
 The judge does **not** reconstruct intervals between sampled frames. With 30
 prepared frames and `--max-frames 10`, its temporal reference contains only the

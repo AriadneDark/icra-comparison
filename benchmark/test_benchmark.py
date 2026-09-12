@@ -164,6 +164,15 @@ class HybridEvaluationTests(unittest.TestCase):
             "0": "yes", "3": "uncertain", "6": "uncertain",
         })
 
+    def test_verifier_accepts_compact_ordered_labels(self):
+        facts = [{"id": "robot_track", "kind": "role", "role": "robot", "label": "arm"}]
+        verdicts = sanitize_verdicts({"verdicts": [{
+            "claim_id": "robot_track", "labels": ["y", "n", "u", "y"],
+        }]}, facts, [0, 3, 6])
+        self.assertEqual(verdicts[0]["frame_verdicts"], {
+            "0": "yes", "3": "no", "6": "uncertain",
+        })
+
     def test_sampled_reference_contains_no_unobserved_frames(self):
         facts = [{"id": "edge", "kind": "relation", "subject": "robot",
                   "predicate": "holding", "object": "manipulated_object"}]

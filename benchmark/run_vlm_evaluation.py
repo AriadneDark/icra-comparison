@@ -254,6 +254,8 @@ def merge_proposal(base: dict[str, Any], proposal: dict[str, list[dict[str, Any]
 def verifier_prompt(
     goal: str, facts: list[dict[str, Any]], frame_count: int, selected_frames: set[int]
 ) -> str:
+    frame_order = sorted(selected_frames)
+    example_labels = ["u"] * len(frame_order)
     blind = []
     for fact in facts:
         if fact["kind"] == "role":
@@ -282,10 +284,12 @@ Planning goal:
 
 Do not assume the demonstrated goal succeeded. For every claim return yes, no, or uncertain.
 Judge every claim separately at every supplied original frame. Do not infer any unshown frame.
-The only allowed frame keys are {sorted(selected_frames)}.
+Use the exact frame order {frame_order} for every labels array.
+Use y=yes, n=no, and u=uncertain. Every labels array must have exactly
+{len(selected_frames)} entries.
 Return exactly one JSON object and no Markdown:
-{{"verdicts": [{{"claim_id": "...", "frame_verdicts":
-{{"0": "no", "3": "uncertain", "6": "yes"}}}}]}}
+{{"frame_indices": {frame_order},
+"verdicts": [{{"claim_id": "...", "labels": {json_dumps(example_labels)}}}]}}
 
 Claims:
 {json_dumps(blind)}"""
@@ -330,15 +334,30 @@ def sanitize_verdicts(
 ) -> list[dict[str, Any]]:
     known = {fact["id"] for fact in facts}
     by_id: dict[str, dict[str, Any]] = {}
+    short_labels = {"y": "yes", "n": "no", "u": "uncertain"}
     for item in payload.get("verdicts", []):
         if not isinstance(item, dict) or item.get("claim_id") not in known:
             continue
-        raw = item.get("frame_verdicts", {})
-        raw = raw if isinstance(raw, dict) else {}
-        frame_verdicts = {}
-        for frame_index in sampled_frames:
-            label = normalize_text(raw.get(str(frame_index), raw.get(frame_index, "uncertain")))
-            frame_verdicts[str(frame_index)] = label if label in {"yes", "no", "uncertain"} else "uncertain"
+        compact = item.get("labels")
+        frame_verdicts: dict[str, str] = {}
+        if isinstance(compact, list):
+            for position, frame_index in enumerate(sampled_frames):
+                raw_label = compact[position] if position < len(compact) else "u"
+                normalized = normalize_text(raw_label)
+                label = short_labels.get(normalized, normalized)
+                frame_verdicts[str(frame_index)] = (
+                    label if label in {"yes", "no", "uncertain"} else "uncertain"
+                )
+        else:
+            # Backward-compatible reader for verbose/current partial responses.
+            raw = item.get("frame_verdicts", {})
+            raw = raw if isinstance(raw, dict) else {}
+            for frame_index in sampled_frames:
+                normalized = normalize_text(raw.get(str(frame_index), raw.get(frame_index, "uncertain")))
+                label = short_labels.get(normalized, normalized)
+                frame_verdicts[str(frame_index)] = (
+                    label if label in {"yes", "no", "uncertain"} else "uncertain"
+                )
         labels = list(frame_verdicts.values())
         aggregate = "yes" if "yes" in labels else ("no" if labels and set(labels) == {"no"} else "uncertain")
         by_id[item["claim_id"]] = {
