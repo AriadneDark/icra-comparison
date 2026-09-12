@@ -46,7 +46,6 @@ services:
     ports:
       - "127.0.0.1:${GEMMA_JUDGE_PORT:-8000}:8000"
     command:
-      - --model
       - ${GEMMA_JUDGE_MODEL:-google/gemma-4-31B-it}
       - --dtype
       - bfloat16
@@ -57,7 +56,7 @@ services:
       - --gpu-memory-utilization
       - ${GEMMA_JUDGE_GPU_MEMORY_UTILIZATION:-0.95}
       - --limit-mm-per-prompt
-      - image=10
+      - '{"image": 10}'
       - --reasoning-parser
       - gemma4
     deploy:
