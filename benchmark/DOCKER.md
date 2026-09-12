@@ -178,7 +178,49 @@ not require root privileges. If an older run already created a root-owned
 cache, point `HF_CACHE_DIR` and `TORCH_CACHE_DIR` in `docker.env` at new
 user-owned directories instead of trying to modify the old cache.
 
-## 6. Three-panel visualization
+## 6. Local Gemma 4 evaluation judge (A100 80 GB)
+
+The evaluation judge is a separate vLLM service and is not used to generate the
+three methods' graphs. Stop/finish SG-Ego and SVG2 first so the judge has the
+GPU to itself. Defaults in `benchmark/docker.env.example` select
+`google/gemma-4-31B-it`, BF16, an 8192-token context, one sequence, and at most
+10 input images per request.
+
+```bash
+./benchmark/docker-run.sh judge-start
+./benchmark/docker-run.sh judge-logs
+```
+
+On first start, vLLM and about 63 GB of weights are downloaded. Press `Ctrl-C`
+after the server becomes ready; this exits the log viewer without stopping the
+service. Then run:
+
+```bash
+./benchmark/docker-run.sh judge-smoke
+./benchmark/docker-run.sh eval-vlm-local --limit 1 --workers 1
+./benchmark/docker-run.sh eval-vlm-local --workers 1
+./benchmark/docker-run.sh judge-stop
+```
+
+No real API key is used. The model cache is written as the invoking host user.
+The evaluation runner discovers the model id from `/v1/models` and records it
+in every result. Do not use more than one evaluation worker with this BF16 model
+on one A100 80 GB.
+
+Useful management commands:
+
+```bash
+./benchmark/docker-run.sh judge-status
+./benchmark/docker-run.sh judge-logs
+./benchmark/docker-run.sh judge-stop
+```
+
+If model loading is out of memory, set
+`GEMMA_JUDGE_MODEL=google/gemma-4-26B-A4B-it` in `benchmark/docker.env` and run
+`judge-start` again. Changing the judge invalidates existing VLM judgments; use
+`--overwrite` only when intentionally regenerating the full set.
+
+## 7. Three-panel visualization
 
 After both baselines finish, render synchronized `OUR | SG-EGO | SVG2` videos:
 
@@ -196,7 +238,7 @@ For one episode:
 Videos are written to `baseline_runs/comparisons/`. Add `--allow-missing` to
 inspect the layout before every baseline result is available.
 
-## 7. Precision and recall
+## 8. Precision and recall
 
 Metrics require independent human reference graphs. Once they are available,
 run the evaluator in the SVG2 image (replace the reference path):

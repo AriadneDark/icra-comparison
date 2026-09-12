@@ -26,6 +26,50 @@ x-common: &common
   shm_size: 16gb
 
 services:
+  # Independent local VLM judge. Start it only after SG-Ego/SVG2 have released
+  # the GPU: Gemma 4 31B BF16 uses most of an A100 80 GB.
+  gemma-judge:
+    image: ${GEMMA_JUDGE_IMAGE:-vllm/vllm-openai:v0.29.0-cu129}
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    volumes:
+      - ${HF_CACHE_DIR:-./.cache/huggingface}:/models/huggingface
+    environment:
+      HOME: /tmp
+      XDG_CACHE_HOME: /models/huggingface/.cache
+      HF_HOME: /models/huggingface
+      VLLM_CACHE_ROOT: /models/huggingface/vllm
+      TRITON_CACHE_DIR: /models/huggingface/triton
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    ports:
+      - "127.0.0.1:${GEMMA_JUDGE_PORT:-8000}:8000"
+    command:
+      - --model
+      - ${GEMMA_JUDGE_MODEL:-google/gemma-4-31B-it}
+      - --dtype
+      - bfloat16
+      - --max-model-len
+      - ${GEMMA_JUDGE_MAX_MODEL_LEN:-8192}
+      - --max-num-seqs
+      - ${GEMMA_JUDGE_MAX_NUM_SEQS:-1}
+      - --gpu-memory-utilization
+      - ${GEMMA_JUDGE_GPU_MEMORY_UTILIZATION:-0.95}
+      - --limit-mm-per-prompt
+      - image=10
+      - --reasoning-parser
+      - gemma4
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ipc: host
+    shm_size: 16gb
+
   sg-ego:
     <<: *common
     build:

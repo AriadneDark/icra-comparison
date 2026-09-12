@@ -4,7 +4,9 @@ from evaluate import compare_episode
 from hybrid_common import build_candidates, frames_from_intervals, intervals_from_frames
 from normalize import normalize_ours, normalize_sgego, normalize_svg2
 from report_hybrid_evaluation import interval_iou
-from run_vlm_evaluation import verifier_visual_plan
+from run_vlm_evaluation import (
+    is_local_endpoint, messages_for_model, model_request_args, verifier_visual_plan,
+)
 
 
 class NormalizationTests(unittest.TestCase):
@@ -79,6 +81,26 @@ class MetricTests(unittest.TestCase):
 
 
 class HybridEvaluationTests(unittest.TestCase):
+    def test_local_judge_endpoint_needs_no_real_api_key(self):
+        self.assertTrue(is_local_endpoint("http://gemma-judge:8000/v1"))
+        self.assertTrue(is_local_endpoint("http://127.0.0.1:8000/v1"))
+        self.assertFalse(is_local_endpoint("https://provider.example/v1"))
+
+    def test_gemma4_requests_deterministic_json_without_thinking(self):
+        args = model_request_args("google/gemma-4-31B-it")
+        self.assertEqual(args["temperature"], 0.0)
+        self.assertEqual(args["response_format"], {"type": "json_object"})
+        self.assertFalse(args["extra_body"]["chat_template_kwargs"]["enable_thinking"])
+
+    def test_gemma4_places_images_before_text(self):
+        messages = [{"role": "user", "content": [
+            {"type": "text", "text": "prompt"},
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,x"}},
+        ]}]
+        ordered = messages_for_model("google/gemma-4-31B-it", messages)
+        self.assertEqual(ordered[0]["content"][0]["type"], "image_url")
+        self.assertIs(messages_for_model("Qwen/test", messages), messages)
+
     def test_interval_round_trip(self):
         intervals = intervals_from_frames([0, 1, 4, 5, 6])
         self.assertEqual(intervals, [[0, 1], [4, 6]])

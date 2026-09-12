@@ -32,7 +32,9 @@ accepts manifests of arbitrary size:
 ./benchmark/docker-run.sh all --expected-count 1000
 ```
 
-Set an independent judge in `benchmark/docker.env` when possible:
+The recommended independent judge on an A100 80 GB is the local
+`google/gemma-4-31B-it` service described below. A hosted independent judge can
+instead be set in `benchmark/docker.env`:
 
 ```dotenv
 EVAL_VLM_API_KEY=...
@@ -83,17 +85,38 @@ Do not regenerate the study manifest after annotation begins.
 
 ## 3. Run the VLM proposer and verifier
 
-Run a smoke test first:
+Make sure SG-Ego and SVG2 have exited before starting the judge: Gemma 4 31B in
+BF16 uses most of the A100 80 GB. Start the pinned vLLM server and follow its
+startup logs:
 
 ```bash
-./benchmark/docker-run.sh eval-vlm --limit 1 --workers 1
+./benchmark/docker-run.sh judge-start
+./benchmark/docker-run.sh judge-logs
+```
+
+The first run downloads roughly 63 GB of model weights into `HF_CACHE_DIR`.
+After vLLM reports that the server is ready, leave the log view with `Ctrl-C`;
+the server keeps running. Check its model endpoint and run one video:
+
+```bash
+./benchmark/docker-run.sh judge-smoke
+./benchmark/docker-run.sh eval-vlm-local --limit 1 --workers 1
 ```
 
 Then process all videos:
 
 ```bash
-./benchmark/docker-run.sh eval-vlm --workers 2
+./benchmark/docker-run.sh eval-vlm-local --workers 1
+./benchmark/docker-run.sh judge-stop
 ```
+
+`eval-vlm-local` discovers the exact served model id and needs no real API key.
+Keep one worker on a single 80 GB GPU. The local defaults can be changed through
+the `GEMMA_JUDGE_*` values in `benchmark/docker.env`. If BF16 model loading runs
+out of memory, set `GEMMA_JUDGE_MODEL=google/gemma-4-26B-A4B-it`, restart the
+judge, and rerun the one-video check. Do not switch models in the middle of a
+study unless all old VLM outputs are removed or deliberately regenerated with
+`--overwrite`.
 
 Each video uses two calls:
 

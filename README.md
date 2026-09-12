@@ -290,12 +290,28 @@ export EVAL_ROOT="$BENCHMARK_WORK_ROOT/evaluation_1000"
   --double-annotation-size 25
 ```
 
-Запустить VLM сначала на одном видео, затем на всех:
+Для независимого локального judge на A100 80 GB используется
+`google/gemma-4-31B-it` в BF16. Сначала убедиться, что SG-Ego и SVG2 больше не
+занимают GPU, затем поднять сервер и дождаться загрузки модели:
 
 ```bash
-./benchmark/docker-run.sh eval-vlm --limit 1 --workers 1
-./benchmark/docker-run.sh eval-vlm --workers 2
+./benchmark/docker-run.sh judge-start
+./benchmark/docker-run.sh judge-logs
 ```
+
+После появления сообщения о готовности сервера нажать `Ctrl-C`: это остановит
+только просмотр логов, но не контейнер. Проверить endpoint и выполнить сначала
+одно видео, затем весь набор:
+
+```bash
+./benchmark/docker-run.sh judge-smoke
+./benchmark/docker-run.sh eval-vlm-local --limit 1 --workers 1
+./benchmark/docker-run.sh eval-vlm-local --workers 1
+./benchmark/docker-run.sh judge-stop
+```
+
+Настоящий API-ключ локальному judge не нужен. Результаты resumable: без
+`--overwrite` уже готовые JSON пропускаются.
 
 Запустить интерфейс первого аннотатора:
 

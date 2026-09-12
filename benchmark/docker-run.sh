@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/benchmark/compose.yaml"
 ENV_FILE="$ROOT_DIR/benchmark/docker.env"
+export LOCAL_UID="${LOCAL_UID:-$(id -u)}"
+export LOCAL_GID="${LOCAL_GID:-$(id -g)}"
 MANIFEST="${BENCHMARK_MANIFEST:-our_results/random_review_100_seed_20260907.json}"
 SOURCE_ROOT="${BENCHMARK_SOURCE_ROOT:-our_results/scenes}"
 WORK_ROOT="${BENCHMARK_WORK_ROOT:-baseline_runs}"
@@ -42,6 +44,12 @@ usage() {
     "  visualize   Render OUR | SG-EGO | SVG2 comparison videos" \
     "  eval-prepare   Build candidates and choose the 80+20 human videos" \
     "  eval-vlm       Run VLM proposer/verifier over the evaluation set" \
+    "  judge-start    Start local Gemma 4 31B VLM server" \
+    "  judge-status   Show local judge container status" \
+    "  judge-smoke    Check the local judge OpenAI-compatible endpoint" \
+    "  judge-logs     Follow local judge startup/request logs" \
+    "  judge-stop     Stop local judge and release the GPU" \
+    "  eval-vlm-local Evaluate through the running local Gemma judge" \
     "  eval-annotate  Start blind human UI (optional annotator id)" \
     "  eval-report    Build human/calibrated/full reports" \
     "  estimate-time  Estimate a previous run from artifact timestamps" \
@@ -136,6 +144,33 @@ case "$command" in
       benchmark/run_vlm_evaluation.py \
       --study-root "$EVAL_ROOT" \
       --source-root "$SOURCE_ROOT" "$@"
+    ;;
+  judge-start)
+    "${compose[@]}" up -d gemma-judge
+    printf '%s\n' \
+      "Gemma judge is starting. Initial model download/load can take a while." \
+      "Follow it with: ./benchmark/docker-run.sh judge-logs"
+    ;;
+  judge-status)
+    "${compose[@]}" ps gemma-judge
+    ;;
+  judge-smoke)
+    "${compose[@]}" exec -T gemma-judge python3 -c \
+      'import json, urllib.request; print(json.load(urllib.request.urlopen("http://127.0.0.1:8000/v1/models", timeout=30)))'
+    ;;
+  judge-logs)
+    "${compose[@]}" logs -f gemma-judge
+    ;;
+  judge-stop)
+    "${compose[@]}" stop gemma-judge
+    ;;
+  eval-vlm-local)
+    "${compose[@]}" "${container_run[@]}" svg2 python \
+      benchmark/run_vlm_evaluation.py \
+      --study-root "$EVAL_ROOT" \
+      --source-root "$SOURCE_ROOT" \
+      --base-url http://gemma-judge:8000/v1 \
+      --model auto "$@"
     ;;
   eval-annotate)
     annotator="${1:-annotator1}"

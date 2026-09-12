@@ -11,6 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from PIL import Image, ImageDraw
 
@@ -76,8 +77,16 @@ def visual_content(
     return content
 
 
-def qwen_args(model: str) -> dict[str, Any]:
-    if "qwen" not in model.casefold():
+def model_request_args(model: str) -> dict[str, Any]:
+    folded = model.casefold()
+    if "gemma-4" in folded or "gemma4" in folded:
+        return {
+            "temperature": 0.0,
+            "max_tokens": 2048,
+            "response_format": {"type": "json_object"},
+            "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
+        }
+    if "qwen" not in folded:
         return {"temperature": 0.0, "max_tokens": 4096}
     return {
         "temperature": 0.0,
@@ -88,12 +97,35 @@ def qwen_args(model: str) -> dict[str, Any]:
     }
 
 
+def is_local_endpoint(base_url: str) -> bool:
+    """Return true for the unauthenticated judge endpoints used by this repo."""
+    return (urlparse(base_url).hostname or "").casefold() in {
+        "127.0.0.1", "localhost", "host.docker.internal", "gemma-judge",
+    }
+
+
+def messages_for_model(model: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Use Gemma 4's recommended image-before-text multimodal ordering."""
+    if "gemma-4" not in model.casefold() and "gemma4" not in model.casefold():
+        return messages
+    prepared: list[dict[str, Any]] = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            prepared.append(message)
+            continue
+        images = [item for item in content if item.get("type") == "image_url"]
+        other = [item for item in content if item.get("type") != "image_url"]
+        prepared.append({**message, "content": images + other})
+    return prepared
+
+
 def request_object(client: Any, model: str, messages: list[dict[str, Any]], retries: int) -> dict[str, Any]:
     last_error: Exception | None = None
     malformed: str | None = None
     for attempt in range(retries):
         try:
-            request_messages = messages
+            request_messages = messages_for_model(model, messages)
             if malformed is not None:
                 request_messages = [
                     {
@@ -103,7 +135,7 @@ def request_object(client: Any, model: str, messages: list[dict[str, Any]], retr
                     {"role": "user", "content": malformed},
                 ]
             response = client.chat.completions.create(
-                model=model, messages=request_messages, **qwen_args(model)
+                model=model, messages=request_messages, **model_request_args(model)
             )
             content = response.choices[0].message.content
             try:
@@ -403,16 +435,27 @@ def main() -> None:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
-    if not args.model or not args.base_url:
-        raise SystemExit("Set EVAL_VLM_MODEL and EVAL_VLM_BASE_URL")
+    if not args.base_url:
+        raise SystemExit("Set EVAL_VLM_BASE_URL (and EVAL_VLM_MODEL, or use --model auto)")
     key = os.environ.get(args.api_key_env)
     if not key and args.api_key_env == "EVAL_VLM_API_KEY":
         key = os.environ.get("SVG2_API_KEY")
+    if not key and is_local_endpoint(args.base_url):
+        key = "local"
     if not key:
         raise SystemExit(f"Set {args.api_key_env} (or SVG2_API_KEY for the default fallback)")
 
     from openai import OpenAI
     client = OpenAI(api_key=key, base_url=args.base_url, timeout=180.0, max_retries=0)
+    model = args.model
+    if model == "auto":
+        available = [entry.id for entry in client.models.list().data]
+        if not available:
+            raise SystemExit(f"No models reported by {args.base_url}")
+        model = available[0]
+        print(f"Using model discovered from local server: {model}", flush=True)
+    if not model:
+        raise SystemExit("Set EVAL_VLM_MODEL or pass --model auto")
     study_root = Path(args.study_root).resolve()
     study = load_json(study_root / "study_manifest.json")
     records = study["episodes"]
@@ -427,7 +470,7 @@ def main() -> None:
 
     def run(record: dict[str, Any]) -> str:
         return process_episode(
-            client, args.model, record, study_root, source_root, ontology,
+            client, model, record, study_root, source_root, ontology,
             args.max_frames, args.retries, args.overwrite,
         )
 
