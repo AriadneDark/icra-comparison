@@ -3,9 +3,10 @@ import unittest
 from evaluate import compare_episode
 from hybrid_common import build_candidates, frames_from_intervals, intervals_from_frames
 from normalize import normalize_ours, normalize_sgego, normalize_svg2
-from report_hybrid_evaluation import interval_iou
+from report_hybrid_evaluation import human_sampled_episode_counts, interval_iou
 from run_vlm_evaluation import (
-    is_local_endpoint, messages_for_model, model_request_args, verifier_visual_plan,
+    is_local_endpoint, messages_for_model, model_request_args, reference_from_verdicts,
+    sanitize_proposal, sanitize_verdicts, verifier_visual_plan,
 )
 
 
@@ -139,6 +140,54 @@ class HybridEvaluationTests(unittest.TestCase):
         indices, overlays = verifier_visual_plan(facts, frame_count=10, maximum=6)
         self.assertIn(7, indices)
         self.assertEqual(overlays[7][0][0], "r_track")
+
+    def test_proposer_cannot_label_unshown_frames(self):
+        proposal = sanitize_proposal({
+            "roles": [{
+                "role": "robot", "label": "arm", "visible_frames": [0, 1, 3, 6, 7],
+            }],
+            "relations": [{
+                "subject": "robot", "predicate": "holding",
+                "object": "manipulated_object", "frames": [3, 4, 6],
+            }],
+        }, frame_count=10, ontology={}, sampled_frames=[0, 3, 6, 9])
+        self.assertEqual(proposal["roles"][0]["visible_intervals"], [[0, 0], [3, 3], [6, 6]])
+        self.assertEqual(proposal["relations"][0]["intervals"], [[3, 3], [6, 6]])
+
+    def test_verifier_is_complete_only_on_shown_frames(self):
+        facts = [{"id": "robot_track", "kind": "role", "role": "robot", "label": "arm"}]
+        verdicts = sanitize_verdicts({"verdicts": [{
+            "claim_id": "robot_track",
+            "frame_verdicts": {"0": "yes", "1": "yes", "6": "invalid"},
+        }]}, facts, [0, 3, 6])
+        self.assertEqual(verdicts[0]["frame_verdicts"], {
+            "0": "yes", "3": "uncertain", "6": "uncertain",
+        })
+
+    def test_sampled_reference_contains_no_unobserved_frames(self):
+        facts = [{"id": "edge", "kind": "relation", "subject": "robot",
+                  "predicate": "holding", "object": "manipulated_object"}]
+        verdicts = [{"claim_id": "edge", "frame_verdicts": {
+            "0": "yes", "3": "no", "6": "yes", "7": "yes",
+        }}]
+        reference = reference_from_verdicts(facts, verdicts, 10, [0, 3, 6])
+        self.assertEqual(reference["evaluated_frame_indices"], [0, 3, 6])
+        self.assertEqual([frame["frame_index"] for frame in reference["frames"]], [0, 3, 6])
+        self.assertEqual(reference["frames"][2]["edges"], [["robot", "holding", "manipulated_object"]])
+
+    def test_human_sampled_counts_use_only_checkpoints(self):
+        fact = {
+            "id": "relation", "kind": "relation", "subject": "robot",
+            "predicate": "holding", "object": "manipulated_object",
+            "sources": ["ours"], "source_intervals": {"ours": [[0, 9]]},
+        }
+        annotation = {
+            "roles": {},
+            "claim_labels": {"relation": {"label": "yes", "intervals": [[4, 5]]}},
+            "missing_relations": [],
+        }
+        counts = human_sampled_episode_counts([fact], annotation, {}, [0, 5, 9])
+        self.assertEqual(counts["ours"]["relations"], (1.0, 2.0, 0.0))
 
 
 if __name__ == "__main__":

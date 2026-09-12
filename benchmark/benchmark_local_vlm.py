@@ -105,7 +105,7 @@ def main() -> None:
         {"type": "text", "text": f"Image {position} is original frame {frame_index}."}
         for position, frame_index in enumerate(indices, 1)
     )
-    content.append({"type": "text", "text": proposer_prompt(args.goal, frame_count)})
+    content.append({"type": "text", "text": proposer_prompt(args.goal, frame_count, indices)})
     preprocessing_seconds = time.perf_counter() - preprocessing_started
 
     request_args = model_request_args(model)

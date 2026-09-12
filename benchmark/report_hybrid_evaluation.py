@@ -11,9 +11,15 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from .hybrid_common import METHODS, ROLE_ORDER, canonical_predicate, load_json, load_ontology, write_json
+    from .hybrid_common import (
+        METHODS, ROLE_ORDER, canonical_predicate, frames_from_intervals,
+        load_json, load_ontology, write_json,
+    )
 except ImportError:
-    from hybrid_common import METHODS, ROLE_ORDER, canonical_predicate, load_json, load_ontology, write_json
+    from hybrid_common import (
+        METHODS, ROLE_ORDER, canonical_predicate, frames_from_intervals,
+        load_json, load_ontology, write_json,
+    )
 
 
 def scores(tp: float, fp: float, fn: float) -> dict[str, float]:
@@ -110,18 +116,26 @@ def calibration_table(
         annotation, vlm = load_json(annotation_path), load_json(vlm_path)
         if not annotation.get("complete"):
             continue
-        fact_kind = {fact["id"]: fact["kind"] for fact in vlm["facts"]}
-        human = annotation.get("claim_labels", {})
+        fact_by_id = {fact["id"]: fact for fact in vlm["facts"]}
         for verdict in vlm.get("verdicts", []):
-            human_label = human.get(verdict["claim_id"], {}).get("label")
-            if human_label not in {"yes", "no"}:
+            fact = fact_by_id.get(verdict.get("claim_id"))
+            if not fact:
                 continue
-            kind = fact_kind.get(verdict["claim_id"])
-            vlm_label = verdict.get("label", "uncertain")
-            if kind not in {"role", "relation"} or vlm_label not in {"yes", "no", "uncertain"}:
+            frame_verdicts = verdict.get("frame_verdicts", {})
+            if not isinstance(frame_verdicts, dict):
                 continue
-            counts[(kind, vlm_label)][0 if human_label == "yes" else 1] += 1
-            confusion[kind][f"human_{human_label}__vlm_{vlm_label}"] += 1
+            for frame_value, vlm_label in frame_verdicts.items():
+                if vlm_label not in {"yes", "no", "uncertain"}:
+                    continue
+                try:
+                    frame_index = int(frame_value)
+                except (TypeError, ValueError):
+                    continue
+                human_label = human_frame_label(fact, annotation, frame_index)
+                if human_label not in {"yes", "no"}:
+                    continue
+                counts[(fact["kind"], vlm_label)][0 if human_label == "yes" else 1] += 1
+                confusion[fact["kind"]][f"human_{human_label}__vlm_{vlm_label}"] += 1
 
     priors = {"yes": (1.6, 0.4), "no": (0.4, 1.6), "uncertain": (1.0, 1.0)}
     table: dict[str, dict[str, dict[str, float]]] = {"role": {}, "relation": {}}
@@ -137,42 +151,139 @@ def calibration_table(
     return table, {kind: dict(values) for kind, values in confusion.items()}
 
 
+def interval_contains(intervals: list[list[int]], frame_index: int) -> bool:
+    return frame_index in frames_from_intervals(intervals, frame_index + 1)
+
+
+def human_frame_label(
+    fact: dict[str, Any], annotation: dict[str, Any], frame_index: int,
+) -> str | None:
+    """Return human truth for one candidate fact at one actually inspected frame."""
+    claim = annotation.get("claim_labels", {}).get(fact["id"], {})
+    claim_label = claim.get("label")
+    if claim_label == "no":
+        return "no"
+    if claim_label != "yes":
+        return None
+    if fact["kind"] == "role":
+        role = annotation.get("roles", {}).get(fact["role"], {})
+        status = role.get("status", "ambiguous")
+        if status == "not_applicable":
+            return "no"
+        if status != "present":
+            return None
+        return "yes" if interval_contains(role.get("visible_intervals", []), frame_index) else "no"
+    return "yes" if interval_contains(claim.get("intervals", []), frame_index) else "no"
+
+
+def source_active(fact: dict[str, Any], method: str, frame_index: int) -> bool:
+    return method in fact.get("sources", []) and interval_contains(
+        fact.get("source_intervals", {}).get(method, []), frame_index
+    )
+
+
+def human_sampled_episode_counts(
+    facts: list[dict[str, Any]], annotation: dict[str, Any], ontology: dict[str, str],
+    sampled_frames: list[int],
+) -> dict[str, dict[str, tuple[float, float, float]]]:
+    """Exact human counts restricted to the same checkpoints used by the VLM judge."""
+    result = {method: {kind: (0.0, 0.0, 0.0) for kind in ("roles", "relations")} for method in METHODS}
+    role_facts = [fact for fact in facts if fact["kind"] == "role"]
+    relation_facts = [fact for fact in facts if fact["kind"] == "relation"]
+    labels = annotation.get("claim_labels", {})
+    for method in METHODS:
+        for frame_index in sampled_frames:
+            for role_name in ROLE_ORDER:
+                role = annotation.get("roles", {}).get(role_name, {})
+                if role.get("status") not in {"present", "not_applicable"}:
+                    continue
+                expected = role.get("status") == "present" and interval_contains(
+                    role.get("visible_intervals", []), frame_index
+                )
+                candidates = [fact for fact in role_facts if fact["role"] == role_name]
+                active = [fact for fact in candidates if source_active(fact, method, frame_index)]
+                correct = any(labels.get(fact["id"], {}).get("label") == "yes" for fact in active)
+                value = (
+                    1.0 if expected and correct else 0.0,
+                    1.0 if active and not (expected and correct) else 0.0,
+                    1.0 if expected and not correct else 0.0,
+                )
+                result[method]["roles"] = add_counts(result[method]["roles"], value)
+
+            for fact in relation_facts:
+                human_label = labels.get(fact["id"], {}).get("label")
+                if human_label not in {"yes", "no"}:
+                    continue
+                expected = human_label == "yes" and interval_contains(
+                    labels[fact["id"]].get("intervals", []), frame_index
+                )
+                predicted = source_active(fact, method, frame_index)
+                value = (
+                    1.0 if predicted and expected else 0.0,
+                    1.0 if predicted and not expected else 0.0,
+                    1.0 if expected and not predicted else 0.0,
+                )
+                result[method]["relations"] = add_counts(result[method]["relations"], value)
+            for missing in annotation.get("missing_relations", []):
+                if (
+                    missing.get("subject") in ROLE_ORDER
+                    and missing.get("object") in ROLE_ORDER
+                    and canonical_predicate(missing.get("predicate", ""), ontology)
+                    and interval_contains(missing.get("intervals", []), frame_index)
+                ):
+                    result[method]["relations"] = add_counts(
+                        result[method]["relations"], (0.0, 0.0, 1.0)
+                    )
+    return result
+
+
 def vlm_episode_counts(
     vlm: dict[str, Any], calibration: dict[str, dict[str, dict[str, float]]],
     relation_pool_coverage: float, role_pool_coverage: float,
 ) -> dict[str, dict[str, tuple[float, float, float]]]:
     facts = vlm["facts"]
     verdict_by_id = {item["claim_id"]: item for item in vlm.get("verdicts", [])}
-    probability = {}
-    for fact in facts:
-        label = verdict_by_id.get(fact["id"], {}).get("label", "uncertain")
-        probability[fact["id"]] = calibration[fact["kind"]][label]["p_true"]
+    sampled_frames = [int(value) for value in vlm.get("verifier_frame_indices", [])]
+
+    def probability(fact: dict[str, Any], frame_index: int) -> float:
+        verdict = verdict_by_id.get(fact["id"], {})
+        label = verdict.get("frame_verdicts", {}).get(str(frame_index), "uncertain")
+        if label not in {"yes", "no", "uncertain"}:
+            label = "uncertain"
+        return calibration[fact["kind"]][label]["p_true"]
+
     result = {method: {"roles": (0.0, 0.0, 0.0), "relations": (0.0, 0.0, 0.0)} for method in METHODS}
     role_facts = [fact for fact in facts if fact["kind"] == "role"]
     relation_facts = [fact for fact in facts if fact["kind"] == "relation"]
     for method in METHODS:
         role_counts = (0.0, 0.0, 0.0)
-        for role in ROLE_ORDER:
-            universe = [fact for fact in role_facts if fact["role"] == role]
-            predictions = [fact for fact in universe if method in fact.get("sources", [])]
-            truth = max((probability[fact["id"]] for fact in universe), default=0.0)
-            correct = max((probability[fact["id"]] for fact in predictions), default=0.0)
-            role_counts = add_counts(role_counts, (
-                correct,
-                max(0.0, float(bool(predictions)) - correct),
-                max(0.0, truth - correct)
-                + (truth * (1.0 / role_pool_coverage - 1.0) if 0 < role_pool_coverage < 1 else 0.0),
-            ))
+        for frame_index in sampled_frames:
+            for role in ROLE_ORDER:
+                universe = [fact for fact in role_facts if fact["role"] == role]
+                predictions = [fact for fact in universe if source_active(fact, method, frame_index)]
+                truth = max((probability(fact, frame_index) for fact in universe), default=0.0)
+                correct = max((probability(fact, frame_index) for fact in predictions), default=0.0)
+                role_counts = add_counts(role_counts, (
+                    correct,
+                    max(0.0, float(bool(predictions)) - correct),
+                    max(0.0, truth - correct)
+                    + (truth * (1.0 / role_pool_coverage - 1.0) if 0 < role_pool_coverage < 1 else 0.0),
+                ))
         result[method]["roles"] = role_counts
 
-        predicted = [fact for fact in relation_facts if method in fact.get("sources", [])]
-        predicted_ids = {fact["id"] for fact in predicted}
-        tp = sum(probability[fact["id"]] for fact in predicted)
-        fp = sum(1.0 - probability[fact["id"]] for fact in predicted)
-        fn = sum(probability[fact["id"]] for fact in relation_facts if fact["id"] not in predicted_ids)
-        observed_truth = sum(probability[fact["id"]] for fact in relation_facts)
-        if 0 < relation_pool_coverage < 1:
-            fn += observed_truth * (1.0 / relation_pool_coverage - 1.0)
+        tp = fp = fn = 0.0
+        for frame_index in sampled_frames:
+            observed_truth = 0.0
+            for fact in relation_facts:
+                p_true = probability(fact, frame_index)
+                observed_truth += p_true
+                if source_active(fact, method, frame_index):
+                    tp += p_true
+                    fp += 1.0 - p_true
+                else:
+                    fn += p_true
+            if 0 < relation_pool_coverage < 1:
+                fn += observed_truth * (1.0 / relation_pool_coverage - 1.0)
         result[method]["relations"] = (tp, fp, fn)
     return result
 
@@ -233,6 +344,11 @@ def main() -> None:
         split: {f"{method}_{kind}": [] for method in METHODS for kind in ("roles", "relations")}
         for split in ("human_primary", "human_challenge", "human_all")
     }
+    human_sampled_per_video = {
+        f"{method}_{kind}": [] for method in METHODS for kind in ("roles", "relations")
+    }
+    human_sampled_videos = 0
+    human_sampled_checkpoints = 0
     temporal: dict[str, dict[str, list[float]]] = {
         split: {method: [] for method in METHODS}
         for split in ("human_primary", "human_challenge", "human_all")
@@ -252,6 +368,16 @@ def main() -> None:
             continue
         complete_human += 1
         counts = human_episode_counts(vlm["facts"], annotation, ontology)
+        sampled_frames = [int(value) for value in vlm.get("verifier_frame_indices", [])]
+        if vlm.get("schema_version") == "hybrid_vlm_assessment_v2" and sampled_frames:
+            sampled_counts = human_sampled_episode_counts(
+                vlm["facts"], annotation, ontology, sampled_frames
+            )
+            human_sampled_videos += 1
+            human_sampled_checkpoints += len(sampled_frames)
+            for method in METHODS:
+                for kind in ("roles", "relations"):
+                    human_sampled_per_video[f"{method}_{kind}"].append(sampled_counts[method][kind])
         # Estimate pool coverage only on the probability-sampled primary split.
         # The disagreement-selected challenge split is intentionally non-representative.
         if record["evaluation_split"] == "human_primary":
@@ -303,18 +429,39 @@ def main() -> None:
                 if temporal[split][method] else None
             )
 
+    human_sampled_summary: dict[str, Any] = {}
+    human_sampled_totals = {
+        method: {kind: (0.0, 0.0, 0.0) for kind in ("roles", "relations")} for method in METHODS
+    }
+    for method in METHODS:
+        human_sampled_summary[method] = {}
+        for kind in ("roles", "relations"):
+            items = human_sampled_per_video[f"{method}_{kind}"]
+            total = tuple(sum(value[index] for value in items) for index in range(3))
+            human_sampled_totals[method][kind] = total
+            human_sampled_summary[method][kind] = {
+                **scores(*total), "videos": len(items),
+                "bootstrap_95_ci": bootstrap_ci(items, args.seed),
+            }
+        human_sampled_summary[method]["videos"] = human_sampled_videos
+        human_sampled_summary[method]["evaluated_checkpoints"] = human_sampled_checkpoints
+
     vlm_totals = {method: {kind: (0.0, 0.0, 0.0) for kind in ("roles", "relations")} for method in METHODS}
     vlm_videos = 0
+    vlm_checkpoints = 0
     for record in records:
         if record["evaluation_split"] != "vlm_only":
             continue
         path = study_root / "vlm" / f"{record['video_id']}.json"
         if not path.exists():
             continue
-        counts = vlm_episode_counts(
-            load_json(path), calibration, relation_pool_coverage, role_pool_coverage
-        )
+        vlm = load_json(path)
+        sampled_frames = vlm.get("verifier_frame_indices", [])
+        if vlm.get("schema_version") != "hybrid_vlm_assessment_v2" or not sampled_frames:
+            continue
+        counts = vlm_episode_counts(vlm, calibration, relation_pool_coverage, role_pool_coverage)
         vlm_videos += 1
+        vlm_checkpoints += len(sampled_frames)
         for method in METHODS:
             for kind in ("roles", "relations"):
                 vlm_totals[method][kind] = add_counts(vlm_totals[method][kind], counts[method][kind])
@@ -324,16 +471,16 @@ def main() -> None:
     }
     for method in METHODS:
         vlm_summary[method]["videos"] = vlm_videos
+        vlm_summary[method]["evaluated_checkpoints"] = vlm_checkpoints
 
     full_summary: dict[str, Any] = {}
     for method in METHODS:
         full_summary[method] = {}
         for kind in ("roles", "relations"):
-            human_items = human_per_video["human_all"][f"{method}_{kind}"]
-            human_total = tuple(sum(value[index] for value in human_items) for index in range(3))
-            combined = add_counts(human_total, vlm_totals[method][kind])
+            combined = add_counts(human_sampled_totals[method][kind], vlm_totals[method][kind])
             full_summary[method][kind] = scores(*combined)
-        full_summary[method]["videos"] = complete_human + vlm_videos
+        full_summary[method]["videos"] = human_sampled_videos + vlm_videos
+        full_summary[method]["evaluated_checkpoints"] = human_sampled_checkpoints + vlm_checkpoints
 
     second_root = study_root / "human_annotations" / args.second_annotator if args.second_annotator else None
     expected_human = sum(record["evaluation_split"].startswith("human_") for record in records)
@@ -341,6 +488,7 @@ def main() -> None:
     warnings = [
         "VLM-calibrated metrics are model-based estimates, not direct ground-truth precision/recall.",
         "Human-primary is the unbiased headline subset; human-challenge must be reported separately.",
+        "VLM and full-hybrid temporal metrics cover only frames shown to the verifier; unobserved frames are excluded.",
     ]
     if complete_human < expected_human:
         warnings.append(
@@ -355,9 +503,19 @@ def main() -> None:
             "Candidate-pool coverage below 0.95 makes calibrated recall sensitive to the missing-fact correction."
         )
     report = {
-        "schema_version": "hybrid_evaluation_report_v1",
+        "schema_version": "hybrid_evaluation_report_v2",
+        "temporal_basis": {
+            "human_metrics": "full human-annotated facts and relation intervals",
+            "human_sampled_metrics": "exact human truth at verifier checkpoints only",
+            "vlm_calibrated_metrics": "calibrated VLM truth at verifier checkpoints only",
+            "full_hybrid_metrics": "human and VLM counts combined on the same checkpoint basis",
+            "unobserved_frames": "excluded; never inferred from adjacent sampled frames",
+        },
         "human_complete_videos": complete_human,
+        "human_sampled_complete_videos": human_sampled_videos,
+        "human_sampled_checkpoints": human_sampled_checkpoints,
         "vlm_only_complete_videos": vlm_videos,
+        "vlm_only_checkpoints": vlm_checkpoints,
         "candidate_pool_coverage_on_human": {
             "roles": role_pool_coverage,
             "relations": relation_pool_coverage,
@@ -365,6 +523,7 @@ def main() -> None:
         "calibration": calibration,
         "vlm_human_confusion": confusion,
         "human_metrics": human_summary,
+        "human_sampled_metrics": human_sampled_summary,
         "vlm_calibrated_metrics": vlm_summary,
         "full_hybrid_metrics": full_summary,
         "inter_annotator": agreement(annotation_root, second_root, records) if second_root else None,
@@ -385,6 +544,10 @@ def main() -> None:
             for kind in ("roles", "relations"):
                 item = kinds[kind]
                 writer.writerow(["vlm_calibrated", "vlm_only", method, kind, item["precision"], item["recall"], item["f1"], kinds["videos"]])
+        for method, kinds in human_sampled_summary.items():
+            for kind in ("roles", "relations"):
+                item = kinds[kind]
+                writer.writerow(["human_sampled", "human_all", method, kind, item["precision"], item["recall"], item["f1"], kinds["videos"]])
         for method, kinds in full_summary.items():
             for kind in ("roles", "relations"):
                 item = kinds[kind]

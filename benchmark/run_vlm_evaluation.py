@@ -150,32 +150,48 @@ def request_object(client: Any, model: str, messages: list[dict[str, Any]], retr
     raise RuntimeError(f"VLM request failed after {retries} attempts") from last_error
 
 
-def proposer_prompt(goal: str, frame_count: int) -> str:
+def proposer_prompt(goal: str, frame_count: int, sampled_frames: list[int] | None = None) -> str:
+    sampled = sampled_frames if sampled_frames is not None else list(range(frame_count))
     return f"""Analyze this robot-manipulation video using only visible evidence.
 
 Planning goal: {goal}
 The original video has {frame_count} frames numbered 0 through {frame_count - 1}.
+You are shown only original frames: {sampled}.
 
 Identify only these task roles: robot, manipulated_object, initial_support, target.
 Then list visually supported directed relations between those roles. Use concise predicates and
-inclusive original-frame intervals. Do not infer that the goal succeeded merely from its text.
+list only shown frame numbers where each fact is directly visible. Never infer unshown frames.
+Do not infer that the goal succeeded merely from its text.
 
 Return exactly one JSON object:
 {{
   "roles": [
-    {{"role": "robot", "label": "robot arm", "visible_intervals": [[0, 29]]}}
+    {{"role": "robot", "label": "robot arm", "visible_frames": [0, 3, 6]}}
   ],
   "relations": [
     {{"subject": "robot", "predicate": "holding", "object": "manipulated_object",
-      "intervals": [[8, 17]]}}
+      "frames": [10, 13]}}
   ]
 }}
 Use an empty list when nothing is visually supported. No Markdown or explanation."""
 
 
 def sanitize_proposal(
-    payload: dict[str, Any], frame_count: int, ontology: dict[str, str]
+    payload: dict[str, Any], frame_count: int, ontology: dict[str, str],
+    sampled_frames: list[int] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
+    allowed = set(sampled_frames if sampled_frames is not None else range(frame_count))
+
+    def direct_frames(item: dict[str, Any], key: str, legacy_key: str) -> set[int]:
+        values = item.get(key)
+        if isinstance(values, list):
+            return {
+                int(value) for value in values
+                if isinstance(value, int) and not isinstance(value, bool) and int(value) in allowed
+            }
+        # Read old responses defensively, but retain only frames actually shown.
+        return frames_from_intervals(item.get(legacy_key, []), frame_count) & allowed
+
     roles = []
     for item in payload.get("roles", []):
         if not isinstance(item, dict) or item.get("role") not in ROLE_ORDER:
@@ -183,7 +199,7 @@ def sanitize_proposal(
         label = str(item.get("label") or "").strip()
         if not label:
             continue
-        frames = frames_from_intervals(item.get("visible_intervals", []), frame_count)
+        frames = direct_frames(item, "visible_frames", "visible_intervals")
         roles.append({
             "role": item["role"], "label": label,
             "visible_intervals": _bounded_intervals(frames, frame_count),
@@ -198,7 +214,7 @@ def sanitize_proposal(
         predicate = canonical_predicate(str(item.get("predicate") or ""), ontology)
         if not predicate:
             continue
-        frames = frames_from_intervals(item.get("intervals", []), frame_count)
+        frames = direct_frames(item, "frames", "intervals")
         relations.append({
             "subject": subject, "predicate": predicate, "object": obj,
             "intervals": _bounded_intervals(frames, frame_count),
@@ -249,16 +265,9 @@ def verifier_prompt(
                 ],
             }
         else:
-            suggested = sorted({
-                tuple(interval)
-                for intervals in fact.get("source_intervals", {}).values()
-                for interval in intervals
-                if len(interval) == 2
-            })
             claim = {
                 "id": fact["id"], "kind": "relation", "subject": fact["subject"],
                 "predicate": fact["predicate"], "object": fact["object"],
-                "suggested_intervals": [list(value) for value in suggested],
             }
         blind.append(claim)
     return f"""Independently verify atomic claims against the supplied robot-manipulation frames.
@@ -272,10 +281,11 @@ Planning goal:
 {goal}
 
 Do not assume the demonstrated goal succeeded. For every claim return yes, no, or uncertain.
-For a true relation, return corrected inclusive intervals in original frame numbers 0..{frame_count - 1}.
+Judge every claim separately at every supplied original frame. Do not infer any unshown frame.
+The only allowed frame keys are {sorted(selected_frames)}.
 Return exactly one JSON object and no Markdown:
-{{"verdicts": [{{"claim_id": "...", "label": "yes", "confidence": 0.9,
-"evidence_frames": [1, 5], "intervals": [[1, 5]]}}]}}
+{{"verdicts": [{{"claim_id": "...", "frame_verdicts":
+{{"0": "no", "3": "uncertain", "6": "yes"}}}}]}}
 
 Claims:
 {json_dumps(blind)}"""
@@ -315,60 +325,57 @@ def json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def sanitize_verdicts(payload: dict[str, Any], facts: list[dict[str, Any]], frame_count: int) -> list[dict[str, Any]]:
+def sanitize_verdicts(
+    payload: dict[str, Any], facts: list[dict[str, Any]], sampled_frames: list[int]
+) -> list[dict[str, Any]]:
     known = {fact["id"] for fact in facts}
     by_id: dict[str, dict[str, Any]] = {}
     for item in payload.get("verdicts", []):
         if not isinstance(item, dict) or item.get("claim_id") not in known:
             continue
-        label = normalize_text(item.get("label", "uncertain"))
-        if label not in {"yes", "no", "uncertain"}:
-            label = "uncertain"
-        try:
-            confidence = max(0.0, min(1.0, float(item.get("confidence", 0.5))))
-        except (TypeError, ValueError):
-            confidence = 0.5
-        intervals = _bounded_intervals(
-            frames_from_intervals(item.get("intervals", []), frame_count), frame_count
-        )
-        evidence = sorted({
-            int(value) for value in item.get("evidence_frames", [])
-            if isinstance(value, int) and 0 <= value < frame_count
-        })
+        raw = item.get("frame_verdicts", {})
+        raw = raw if isinstance(raw, dict) else {}
+        frame_verdicts = {}
+        for frame_index in sampled_frames:
+            label = normalize_text(raw.get(str(frame_index), raw.get(frame_index, "uncertain")))
+            frame_verdicts[str(frame_index)] = label if label in {"yes", "no", "uncertain"} else "uncertain"
+        labels = list(frame_verdicts.values())
+        aggregate = "yes" if "yes" in labels else ("no" if labels and set(labels) == {"no"} else "uncertain")
         by_id[item["claim_id"]] = {
-            "claim_id": item["claim_id"], "label": label, "confidence": confidence,
-            "evidence_frames": evidence, "intervals": intervals,
+            "claim_id": item["claim_id"], "label": aggregate,
+            "frame_verdicts": frame_verdicts,
         }
     return [by_id.get(fact["id"], {
-        "claim_id": fact["id"], "label": "uncertain", "confidence": 0.0,
-        "evidence_frames": [], "intervals": [],
+        "claim_id": fact["id"], "label": "uncertain",
+        "frame_verdicts": {str(index): "uncertain" for index in sampled_frames},
     }) for fact in facts]
 
 
 def reference_from_verdicts(
-    facts: list[dict[str, Any]], verdicts: list[dict[str, Any]], frame_count: int
+    facts: list[dict[str, Any]], verdicts: list[dict[str, Any]], frame_count: int,
+    sampled_frames: list[int],
 ) -> dict[str, Any]:
-    frames = [{"frame_index": index, "nodes": [], "edges": []} for index in range(frame_count)]
+    frames = {index: {"frame_index": index, "nodes": [], "edges": []} for index in sampled_frames}
     fact_by_id = {fact["id"]: fact for fact in facts}
     for verdict in verdicts:
-        if verdict["label"] != "yes":
-            continue
         fact = fact_by_id[verdict["claim_id"]]
-        if fact["kind"] == "role":
-            intervals = verdict["intervals"] or next(iter(fact.get("source_intervals", {}).values()), [])
-            for index in frames_from_intervals(intervals, frame_count):
+        for value, label in verdict.get("frame_verdicts", {}).items():
+            index = int(value)
+            if label != "yes" or index not in frames:
+                continue
+            if fact["kind"] == "role":
                 frames[index]["nodes"].append(fact["role"])
-        else:
-            intervals = verdict["intervals"]
-            if not intervals:
-                intervals = next(iter(fact.get("source_intervals", {}).values()), [])
-            edge = [fact["subject"], fact["predicate"], fact["object"]]
-            for index in frames_from_intervals(intervals, frame_count):
-                frames[index]["edges"].append(edge)
-    for frame in frames:
+            else:
+                frames[index]["edges"].append([fact["subject"], fact["predicate"], fact["object"]])
+    result = []
+    for frame in frames.values():
         frame["nodes"] = sorted(set(frame["nodes"]))
         frame["edges"] = [list(value) for value in sorted({tuple(value) for value in frame["edges"]})]
-    return {"schema_version": "task_role_graph_v1", "frame_count": frame_count, "frames": frames}
+        result.append(frame)
+    return {
+        "schema_version": "sampled_task_role_graph_v1", "frame_count": frame_count,
+        "evaluated_frame_indices": sampled_frames, "frames": result,
+    }
 
 
 def process_episode(
@@ -379,7 +386,8 @@ def process_episode(
     output_path = study_root / "vlm" / f"{stem}.json"
     reference_path = study_root / "vlm_references" / f"{stem}.json"
     if output_path.exists() and reference_path.exists() and not overwrite:
-        return f"SKIP {stem}"
+        if load_json(output_path).get("schema_version") == "hybrid_vlm_assessment_v2":
+            return f"SKIP {stem}"
     base = load_json(study_root / record["candidate_path"])
     images = sorted((source_root / record["relative_path"] / "images").glob("frame_*.png"))
     if len(images) != int(record["frame_count"]):
@@ -388,9 +396,11 @@ def process_episode(
     selected = [images[index] for index in indices]
     proposal_raw = request_object(client, model, [{
         "role": "user",
-        "content": visual_content(proposer_prompt(record["planning_goal"], len(images)), selected, indices),
+        "content": visual_content(
+            proposer_prompt(record["planning_goal"], len(images), indices), selected, indices
+        ),
     }], retries)
-    proposal = sanitize_proposal(proposal_raw, len(images), ontology)
+    proposal = sanitize_proposal(proposal_raw, len(images), ontology, indices)
     enriched = merge_proposal(base, proposal)
     verifier_indices, overlays = verifier_visual_plan(enriched["facts"], len(images), max_frames)
     verifier_images = [images[index] for index in verifier_indices]
@@ -403,9 +413,9 @@ def process_episode(
             verifier_images, verifier_indices, overlays,
         ),
     }], retries)
-    verdicts = sanitize_verdicts(verifier_raw, enriched["facts"], len(images))
+    verdicts = sanitize_verdicts(verifier_raw, enriched["facts"], verifier_indices)
     output = {
-        "schema_version": "hybrid_vlm_assessment_v1",
+        "schema_version": "hybrid_vlm_assessment_v2",
         "video_id": stem,
         "model": model,
         "judge_independent_of_qwen_generators": "qwen" not in model.casefold(),
@@ -417,7 +427,10 @@ def process_episode(
         "verdicts": verdicts,
     }
     write_json(output_path, output)
-    write_json(reference_path, reference_from_verdicts(enriched["facts"], verdicts, len(images)))
+    write_json(
+        reference_path,
+        reference_from_verdicts(enriched["facts"], verdicts, len(images), verifier_indices),
+    )
     return f"OK {stem} ({len(enriched['facts'])} facts)"
 
 

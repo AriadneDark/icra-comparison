@@ -135,15 +135,23 @@ study unless all old VLM outputs are removed or deliberately regenerated with
 Each video uses two calls:
 
 1. a method-independent proposer sees sampled raw frames and proposes role and
-   relation facts;
+   relation facts separately for the frame indices it actually sees;
 2. a blind verifier sees the union of proposer and method facts, without method
    names; candidate track boxes are drawn on selected evidence frames using only
-   anonymous claim ids. It returns `yes`, `no`, or `uncertain` plus evidence and
-   corrected intervals.
+   anonymous claim ids. For every claim it returns `yes`, `no`, or `uncertain`
+   independently at every displayed frame.
+
+The judge does **not** reconstruct intervals between sampled frames. With 30
+prepared frames and `--max-frames 10`, its temporal reference contains only the
+10 selected checkpoints. The other 20 frames are unknown and excluded from VLM
+metrics. This prevents an event visible at frame 10 and absent at frame 20 from
+being arbitrarily assigned to every frame in between.
 
 Existing `vlm/<video_id>.json` and `vlm_references/<video_id>.json` files are
-skipped. Use `--overwrite` only when intentionally invalidating previous judge
-results. `--max-frames 10` controls the visual evidence budget.
+skipped only when they use the current `hybrid_vlm_assessment_v2` schema. Older
+interval-inference outputs are stale and are regenerated automatically. Use
+`--overwrite` to intentionally rerun current-schema results. `--max-frames 10`
+controls the number of evaluated temporal checkpoints.
 
 ## 4. Human annotation
 
@@ -200,8 +208,10 @@ The JSON contains:
 
 - `human_metrics.human_primary`: unbiased headline scores;
 - `human_metrics.human_challenge`: difficult-case diagnostics;
-- `vlm_calibrated_metrics`: estimated metrics for VLM-only videos;
-- `full_hybrid_metrics`: exact human counts plus calibrated expected counts;
+- `human_sampled_metrics`: exact human truth restricted to judge checkpoints;
+- `vlm_calibrated_metrics`: estimated checkpoint metrics for VLM-only videos;
+- `full_hybrid_metrics`: exact human checkpoint counts plus calibrated VLM
+  checkpoint counts on the same temporal basis;
 - `candidate_pool_coverage_on_human`: separate role and relation coverage;
 - per-verdict calibration counts and VLM/human confusion;
 - bootstrap 95% intervals for human subsets;
@@ -210,5 +220,7 @@ The JSON contains:
 Do not present `vlm_calibrated_metrics` as direct ground-truth precision/recall.
 For the primary scientific claim, report the human-primary result and its paired
 video-level confidence intervals. The full-set calibrated result is supporting
-evidence. If candidate-pool coverage is low, improve the independent proposer or
-increase the human subset before interpreting VLM recall.
+evidence and describes sampled checkpoints, not full video intervals. Exact
+interval quality is reported only from human annotations. If candidate-pool
+coverage is low, improve the independent proposer or increase the human subset
+before interpreting VLM recall.
