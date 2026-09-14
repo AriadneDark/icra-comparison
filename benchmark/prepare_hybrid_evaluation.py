@@ -88,6 +88,8 @@ def main() -> None:
     }
     ontology = load_ontology(args.ontology)
     output_root = Path(args.output_root).resolve()
+    ontology_snapshot = output_root / "predicate_ontology.json"
+    write_json(ontology_snapshot, load_json(args.ontology))
     candidate_root = output_root / "candidates"
     records: list[dict[str, Any]] = []
     missing: list[dict[str, str]] = []
@@ -176,7 +178,7 @@ def main() -> None:
             "strategy": "proportional dataset/task stratification plus high-disagreement challenge set",
             "ppi_design": "stratified probability sample with at least two primary videos per non-singleton stratum",
         },
-        "ontology": str(Path(args.ontology).resolve()),
+        "ontology": ontology_snapshot.name,
         "roots": {method: str(root) for method, root in roots.items()},
         "missing": missing,
         "episodes": records,

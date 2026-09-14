@@ -34,6 +34,18 @@ def write_json(path: str | Path, value: Any) -> None:
     temporary.replace(target)
 
 
+def resolve_study_path(study_root: str | Path, value: str | Path) -> Path:
+    """Resolve a frozen-study resource, including legacy host-absolute paths."""
+    root = Path(study_root).resolve()
+    path = Path(value)
+    if not path.is_absolute():
+        return root / path
+    if path.exists():
+        return path
+    fallback = root / path.name
+    return fallback if fallback.exists() else path
+
+
 def episode_stem(relative_path: str) -> str:
     return relative_path.replace("/", "__")
 

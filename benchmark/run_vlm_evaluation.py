@@ -19,13 +19,13 @@ try:
     from .hybrid_common import (
         ROLE_ORDER, canonical_predicate, episode_stem, fact_id, frames_from_intervals,
         intervals_from_frames, load_json, load_ontology, normalize_text, ontology_predicates,
-        parse_model_object, write_json,
+        parse_model_object, resolve_study_path, write_json,
     )
 except ImportError:
     from hybrid_common import (
         ROLE_ORDER, canonical_predicate, episode_stem, fact_id, frames_from_intervals,
         intervals_from_frames, load_json, load_ontology, normalize_text, ontology_predicates,
-        parse_model_object, write_json,
+        parse_model_object, resolve_study_path, write_json,
     )
 
 
@@ -508,7 +508,7 @@ def main() -> None:
         records = [record for record in records if record["evaluation_split"] == "vlm_only"]
     if args.limit is not None:
         records = records[:args.limit]
-    ontology = load_ontology(study["ontology"])
+    ontology = load_ontology(resolve_study_path(study_root, study["ontology"]))
     source_root = Path(args.source_root).resolve()
 
     def run(record: dict[str, Any]) -> str:

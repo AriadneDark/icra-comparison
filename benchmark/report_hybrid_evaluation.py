@@ -13,12 +13,12 @@ from typing import Any
 try:
     from .hybrid_common import (
         METHODS, ROLE_ORDER, canonical_predicate, frames_from_intervals,
-        load_json, load_ontology, write_json,
+        load_json, load_ontology, resolve_study_path, write_json,
     )
 except ImportError:
     from hybrid_common import (
         METHODS, ROLE_ORDER, canonical_predicate, frames_from_intervals,
-        load_json, load_ontology, write_json,
+        load_json, load_ontology, resolve_study_path, write_json,
     )
 
 
@@ -475,7 +475,7 @@ def main() -> None:
     args = parser.parse_args()
     study_root = Path(args.study_root).resolve()
     study = load_json(study_root / "study_manifest.json")
-    ontology = load_ontology(study["ontology"])
+    ontology = load_ontology(resolve_study_path(study_root, study["ontology"]))
     annotation_root = study_root / "human_annotations" / args.annotator
     records = study["episodes"]
     calibration, confusion = calibration_table(records, study_root, annotation_root)

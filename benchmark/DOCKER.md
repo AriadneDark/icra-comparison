@@ -51,7 +51,7 @@ SVG2_API_KEY_ENV=SVG2_API_KEY
 SVG2_API_BASE_URL=REPLACE_WITH_OPENAI_COMPATIBLE_BASE_URL
 SVG2_API_MODEL=Qwen/Qwen3.8-27B
 SVG2_API_CONCURRENCY=4
-NVIDIA_VISIBLE_DEVICES=all
+NVIDIA_VISIBLE_DEVICES=0
 HF_CACHE_DIR=./.cache/huggingface
 TORCH_CACHE_DIR=./.cache/torch
 ```
@@ -75,7 +75,10 @@ Put the bearer token issued for that endpoint in `SVG2_API_KEY`. Qwen is an
 external dependency of this benchmark and is not started or hosted by this
 Compose project.
 
-To select a single GPU, set `NVIDIA_VISIBLE_DEVICES=0` (or another GPU index).
+Select a physical GPU with `NVIDIA_VISIBLE_DEVICES=0` (for example, use `1` for
+the second card). The Gemma service requests that exact Docker `device_id`, so
+inside its container the selected physical card is exposed as logical
+`cuda:0`; this is expected. Restart the judge after changing the value.
 
 ## 3. Build and verify
 

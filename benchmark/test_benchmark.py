@@ -3,7 +3,7 @@ import unittest
 from evaluate import compare_episode
 from hybrid_common import (
     build_candidates, canonical_predicate, collapse_graph, frames_from_intervals,
-    intervals_from_frames, load_ontology,
+    intervals_from_frames, load_ontology, resolve_study_path,
 )
 from normalize import normalize_ours, normalize_sgego, normalize_svg2
 from prepare_hybrid_evaluation import proportional_stratified_sample
@@ -88,6 +88,17 @@ class MetricTests(unittest.TestCase):
 
 
 class HybridEvaluationTests(unittest.TestCase):
+    def test_study_resource_falls_back_from_host_path_to_frozen_copy(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            frozen = root / "predicate_ontology.json"
+            frozen.write_text("{}", encoding="utf-8")
+            self.assertEqual(
+                resolve_study_path(root, "/different/host/predicate_ontology.json"), frozen
+            )
+
     def test_primary_sample_covers_each_stratum_for_ppi(self):
         records = [
             {"video_id": f"a{i}", "dataset_name": "a", "task_family": "pick"}

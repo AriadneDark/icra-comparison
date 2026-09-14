@@ -41,7 +41,9 @@ services:
       TRITON_CACHE_DIR: /models/huggingface/triton
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
-      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-0}
+      # Docker exposes the selected physical GPU as logical cuda:0.
+      CUDA_VISIBLE_DEVICES: "0"
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     ports:
       - "127.0.0.1:${GEMMA_JUDGE_PORT:-8000}:8000"
@@ -64,7 +66,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              device_ids: ["${NVIDIA_VISIBLE_DEVICES:-0}"]
               capabilities: [gpu]
     ipc: host
     shm_size: 16gb
