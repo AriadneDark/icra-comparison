@@ -275,11 +275,12 @@ docker compose --env-file benchmark/docker.env \
 - 20 high-disagreement видео образуют challenge subset;
 - 25 из этих 100 получает второй аннотатор;
 - все 1000 видео проверяет слепой VLM judge;
-- решения VLM калибруются на human-primary subset;
+- ошибки VLM исправляются методом stratified Prediction-Powered Inference на
+  human-primary subset, при этом независимой единицей остаётся целое видео;
 - VLM ставит `yes/no/uncertain` только каждому реально показанному кадру и не
   достраивает интервалы между ними;
-- для статьи основной результат берётся с human-primary, полный
-  VLM-calibrated результат используется как дополнительный.
+- для статьи основной результат берётся с human-primary, а `ppi_metrics`
+  используется как скорректированная оценка всех 1000 видео.
 
 Подготовить candidate pool и зафиксировать выборку:
 

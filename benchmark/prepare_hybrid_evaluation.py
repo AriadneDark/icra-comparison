@@ -4,9 +4,8 @@
 from __future__ import annotations
 
 import argparse
-import math
 import random
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +24,7 @@ except ImportError:
 def proportional_stratified_sample(
     records: list[dict[str, Any]], size: int, rng: random.Random
 ) -> list[dict[str, Any]]:
-    """Sample proportionally from dataset/task strata with deterministic tie-breaking."""
+    """Sample proportionally while keeping every stratum identifiable for PPI."""
     if size >= len(records):
         return list(records)
     strata: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
@@ -35,20 +34,26 @@ def proportional_stratified_sample(
         rng.shuffle(values)
 
     exact = {key: size * len(values) / len(records) for key, values in strata.items()}
-    allocation = {key: min(len(strata[key]), math.floor(value)) for key, value in exact.items()}
+    # Two observations permit within-stratum uncertainty estimation. Singleton
+    # strata are censused and therefore have no sampling uncertainty.
+    minimum = {key: min(2, len(values)) for key, values in strata.items()}
+    if sum(minimum.values()) > size:
+        raise ValueError(
+            f"human-primary size {size} is too small for PPI coverage of {len(strata)} strata; "
+            f"need at least {sum(minimum.values())}"
+        )
+    allocation = dict(minimum)
     remaining = size - sum(allocation.values())
-    order = sorted(strata, key=lambda key: (exact[key] - allocation[key], len(strata[key]), key), reverse=True)
     while remaining:
-        progressed = False
-        for key in order:
-            if allocation[key] < len(strata[key]):
-                allocation[key] += 1
-                remaining -= 1
-                progressed = True
-                if remaining == 0:
-                    break
-        if not progressed:
+        available = [key for key in strata if allocation[key] < len(strata[key])]
+        if not available:
             break
+        key = max(
+            available,
+            key=lambda value: (exact[value] - allocation[value], len(strata[value]), value),
+        )
+        allocation[key] += 1
+        remaining -= 1
     return [record for key in sorted(strata) for record in strata[key][:allocation[key]]]
 
 
@@ -141,7 +146,15 @@ def main() -> None:
     double_ids = {
         record["video_id"] for record in rng.sample(primary + challenge, args.double_annotation_size)
     }
+    stratum_sizes = Counter((record["dataset_name"], record["task_family"]) for record in records)
+    primary_stratum_sizes = Counter(
+        (record["dataset_name"], record["task_family"]) for record in primary
+    )
     for record in records:
+        stratum = (record["dataset_name"], record["task_family"])
+        record["primary_inclusion_probability"] = (
+            primary_stratum_sizes[stratum] / stratum_sizes[stratum]
+        )
         if record["video_id"] in primary_ids:
             record["evaluation_split"] = "human_primary"
         elif record["video_id"] in challenge_ids:
@@ -161,6 +174,7 @@ def main() -> None:
             "human_challenge": args.challenge_size,
             "double_annotation": args.double_annotation_size,
             "strategy": "proportional dataset/task stratification plus high-disagreement challenge set",
+            "ppi_design": "stratified probability sample with at least two primary videos per non-singleton stratum",
         },
         "ontology": str(Path(args.ontology).resolve()),
         "roots": {method: str(root) for method, root in roots.items()},

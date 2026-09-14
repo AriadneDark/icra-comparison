@@ -62,7 +62,9 @@ This command:
 - collapses frame facts into inclusive temporal intervals;
 - creates the blind union of method claims;
 - computes three-way disagreement;
-- selects 80 stratified primary, 20 challenge, and 25 double-annotation videos.
+- selects 80 stratified primary, 20 challenge, and 25 double-annotation videos;
+- assigns at least two primary videos to every non-singleton dataset/task
+  stratum, so every stratum has an estimable PPI correction.
 
 Outputs are under `$EVAL_ROOT`:
 
@@ -230,15 +232,24 @@ The JSON contains:
 - `vlm_calibrated_metrics`: estimated checkpoint metrics for VLM-only videos;
 - `full_hybrid_metrics`: exact human checkpoint counts plus calibrated VLM
   checkpoint counts on the same temporal basis;
+- `ppi_metrics`: stratified prediction-powered precision/recall for all 1,000
+  videos, debiased only with the probability-sampled 80 human-primary videos;
 - `candidate_pool_coverage_on_human`: separate role and relation coverage;
 - per-verdict calibration counts and VLM/human confusion;
 - bootstrap 95% intervals for human subsets;
 - inter-annotator agreement and Cohen's kappa.
 
+`ppi_metrics` treats a video as the independent sampling unit, uses fixed judge
+scores (`yes=1`, `no=0`, `uncertain=0.5`), and corrects their mean error within
+each dataset/task stratum. Missing relations added by humans enter the recall
+correction with judge score zero. Its 95% intervals use a stratified cluster
+bootstrap over primary videos. The 20 disagreement-selected challenge videos
+are never used for PPI debiasing.
+
 Do not present `vlm_calibrated_metrics` as direct ground-truth precision/recall.
 For the primary scientific claim, report the human-primary result and its paired
-video-level confidence intervals. The full-set calibrated result is supporting
-evidence and describes sampled checkpoints, not full video intervals. Exact
+video-level confidence intervals. `ppi_metrics` is the preferred full-set
+estimate and describes sampled checkpoints, not full video intervals. Exact
 interval quality is reported only from human annotations. If candidate-pool
 coverage is low, improve the independent proposer or increase the human subset
 before interpreting VLM recall.

@@ -305,6 +305,146 @@ def bootstrap_ci(per_video: list[tuple[float, float, float]], seed: int, samples
     }
 
 
+def raw_judge_counts(vlm: dict[str, Any]) -> dict[str, dict[str, tuple[float, float, float]]]:
+    """Turn categorical judge labels into fixed predictions for PPI debiasing."""
+    mapping = {"yes": 1.0, "no": 0.0, "uncertain": 0.5}
+    calibration = {
+        kind: {label: {"p_true": value} for label, value in mapping.items()}
+        for kind in ("role", "relation")
+    }
+    return vlm_episode_counts(vlm, calibration, 1.0, 1.0)
+
+
+def _moments(counts: tuple[float, float, float]) -> tuple[float, float, float]:
+    tp, fp, fn = counts
+    return tp, tp + fp, tp + fn  # true positives, predicted positives, actual positives
+
+
+def _projected_scores(tp: float, predicted: float, actual: float, scale: float = 1.0) -> dict[str, float]:
+    """Project noisy PPI moments onto the feasible precision/recall region."""
+    predicted = max(0.0, predicted)
+    actual = max(0.0, actual)
+    tp = min(max(0.0, tp), predicted, actual)
+    return scores(tp * scale, (predicted - tp) * scale, (actual - tp) * scale)
+
+
+def prediction_powered_metrics(
+    records: list[dict[str, Any]],
+    pseudo_counts: dict[str, dict[str, dict[str, tuple[float, float, float]]]],
+    human_counts: dict[str, dict[str, dict[str, tuple[float, float, float]]]],
+    seed: int,
+    bootstrap_samples: int = 2000,
+) -> dict[str, Any]:
+    """Stratified, video-clustered PPI for precision and recall on all records."""
+    primary = [record for record in records if record["evaluation_split"] == "human_primary"]
+    missing_vlm = [record["video_id"] for record in records if record["video_id"] not in pseudo_counts]
+    missing_human = [record["video_id"] for record in primary if record["video_id"] not in human_counts]
+    if missing_vlm or missing_human:
+        return {
+            "status": "incomplete",
+            "population_videos": len(records),
+            "vlm_complete": len(records) - len(missing_vlm),
+            "human_primary_required": len(primary),
+            "human_primary_complete": len(primary) - len(missing_human),
+            "missing_vlm": missing_vlm[:20],
+            "missing_human_primary": missing_human[:20],
+        }
+
+    strata: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    labeled: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        key = (record["dataset_name"], record["task_family"])
+        strata[key].append(record)
+        if record["evaluation_split"] == "human_primary":
+            labeled[key].append(record)
+    uncovered = [key for key in strata if not labeled[key]]
+    if uncovered:
+        return {
+            "status": "invalid_sampling_design",
+            "reason": "At least one dataset/task stratum has no human-primary video",
+            "uncovered_strata": [list(key) for key in uncovered],
+        }
+
+    total_videos = len(records)
+    result: dict[str, Any] = {
+        "status": "complete",
+        "estimator": "stratified prediction-powered inference at video level",
+        "judge_score_mapping": {"yes": 1.0, "no": 0.0, "uncertain": 0.5},
+        "population_videos": total_videos,
+        "human_primary_videos": len(primary),
+        "bootstrap_samples": bootstrap_samples,
+        "strata": [
+            {
+                "dataset_name": key[0], "task_family": key[1],
+                "population": len(strata[key]), "human_primary": len(labeled[key]),
+            }
+            for key in sorted(strata)
+        ],
+        "methods": {},
+    }
+
+    for method_index, method in enumerate(METHODS):
+        result["methods"][method] = {}
+        for kind_index, kind in enumerate(("roles", "relations")):
+            machine_by_stratum: dict[tuple[str, str], tuple[float, float, float]] = {}
+            residuals_by_stratum: dict[tuple[str, str], list[tuple[float, float]]] = {}
+            point_tp = point_predicted = point_actual = 0.0
+            for key, population in strata.items():
+                weight = len(population) / total_videos
+                pseudo_moments = [
+                    _moments(pseudo_counts[record["video_id"]][method][kind])
+                    for record in population
+                ]
+                machine = tuple(
+                    sum(value[index] for value in pseudo_moments) / len(pseudo_moments)
+                    for index in range(3)
+                )
+                residuals = []
+                for record in labeled[key]:
+                    identifier = record["video_id"]
+                    human = _moments(human_counts[identifier][method][kind])
+                    pseudo = _moments(pseudo_counts[identifier][method][kind])
+                    residuals.append((human[0] - pseudo[0], human[2] - pseudo[2]))
+                residual_tp = sum(value[0] for value in residuals) / len(residuals)
+                residual_actual = sum(value[1] for value in residuals) / len(residuals)
+                machine_by_stratum[key] = machine
+                residuals_by_stratum[key] = residuals
+                point_tp += weight * (machine[0] + residual_tp)
+                point_predicted += weight * machine[1]
+                point_actual += weight * (machine[2] + residual_actual)
+
+            metric = _projected_scores(point_tp, point_predicted, point_actual, total_videos)
+            draws = {name: [] for name in ("precision", "recall", "f1")}
+            rng = random.Random(seed + method_index * 101 + kind_index * 17)
+            for _ in range(bootstrap_samples):
+                draw_tp = draw_predicted = draw_actual = 0.0
+                for key, population in strata.items():
+                    weight = len(population) / total_videos
+                    machine = machine_by_stratum[key]
+                    residuals = residuals_by_stratum[key]
+                    if len(labeled[key]) == len(population):
+                        sampled = residuals
+                    else:
+                        sampled = [rng.choice(residuals) for _ in residuals]
+                    residual_tp = sum(value[0] for value in sampled) / len(sampled)
+                    residual_actual = sum(value[1] for value in sampled) / len(sampled)
+                    draw_tp += weight * (machine[0] + residual_tp)
+                    draw_predicted += weight * machine[1]
+                    draw_actual += weight * (machine[2] + residual_actual)
+                draw = _projected_scores(draw_tp, draw_predicted, draw_actual)
+                for name in draws:
+                    draws[name].append(draw[name])
+            metric["bootstrap_95_ci"] = {
+                name: [
+                    sorted(values)[int(0.025 * bootstrap_samples)],
+                    sorted(values)[int(0.975 * bootstrap_samples) - 1],
+                ]
+                for name, values in draws.items()
+            }
+            result["methods"][method][kind] = metric
+    return result
+
+
 def agreement(first: Path, second: Path, records: list[dict[str, Any]]) -> dict[str, float | int | None]:
     pairs = []
     for record in records:
@@ -347,6 +487,7 @@ def main() -> None:
     human_sampled_per_video = {
         f"{method}_{kind}": [] for method in METHODS for kind in ("roles", "relations")
     }
+    ppi_human_counts: dict[str, dict[str, dict[str, tuple[float, float, float]]]] = {}
     human_sampled_videos = 0
     human_sampled_checkpoints = 0
     temporal: dict[str, dict[str, list[float]]] = {
@@ -373,6 +514,8 @@ def main() -> None:
             sampled_counts = human_sampled_episode_counts(
                 vlm["facts"], annotation, ontology, sampled_frames
             )
+            if record["evaluation_split"] == "human_primary":
+                ppi_human_counts[record["video_id"]] = sampled_counts
             human_sampled_videos += 1
             human_sampled_checkpoints += len(sampled_frames)
             for method in METHODS:
@@ -482,6 +625,19 @@ def main() -> None:
         full_summary[method]["videos"] = human_sampled_videos + vlm_videos
         full_summary[method]["evaluated_checkpoints"] = human_sampled_checkpoints + vlm_checkpoints
 
+    ppi_pseudo_counts: dict[str, dict[str, dict[str, tuple[float, float, float]]]] = {}
+    for record in records:
+        path = study_root / "vlm" / f"{record['video_id']}.json"
+        if not path.exists():
+            continue
+        vlm = load_json(path)
+        if vlm.get("schema_version") != "hybrid_vlm_assessment_v2" or not vlm.get("verifier_frame_indices"):
+            continue
+        ppi_pseudo_counts[record["video_id"]] = raw_judge_counts(vlm)
+    ppi_summary = prediction_powered_metrics(
+        records, ppi_pseudo_counts, ppi_human_counts, args.seed
+    )
+
     second_root = study_root / "human_annotations" / args.second_annotator if args.second_annotator else None
     expected_human = sum(record["evaluation_split"].startswith("human_") for record in records)
     expected_vlm_only = sum(record["evaluation_split"] == "vlm_only" for record in records)
@@ -489,6 +645,7 @@ def main() -> None:
         "VLM-calibrated metrics are model-based estimates, not direct ground-truth precision/recall.",
         "Human-primary is the unbiased headline subset; human-challenge must be reported separately.",
         "VLM and full-hybrid temporal metrics cover only frames shown to the verifier; unobserved frames are excluded.",
+        "PPI uses only the probability-sampled human-primary videos for debiasing; challenge videos are excluded.",
     ]
     if complete_human < expected_human:
         warnings.append(
@@ -503,12 +660,13 @@ def main() -> None:
             "Candidate-pool coverage below 0.95 makes calibrated recall sensitive to the missing-fact correction."
         )
     report = {
-        "schema_version": "hybrid_evaluation_report_v2",
+        "schema_version": "hybrid_evaluation_report_v3",
         "temporal_basis": {
             "human_metrics": "full human-annotated facts and relation intervals",
             "human_sampled_metrics": "exact human truth at verifier checkpoints only",
             "vlm_calibrated_metrics": "calibrated VLM truth at verifier checkpoints only",
             "full_hybrid_metrics": "human and VLM counts combined on the same checkpoint basis",
+            "ppi_metrics": "stratified video-level PPI using the same verifier checkpoints",
             "unobserved_frames": "excluded; never inferred from adjacent sampled frames",
         },
         "human_complete_videos": complete_human,
@@ -526,6 +684,7 @@ def main() -> None:
         "human_sampled_metrics": human_sampled_summary,
         "vlm_calibrated_metrics": vlm_summary,
         "full_hybrid_metrics": full_summary,
+        "ppi_metrics": ppi_summary,
         "inter_annotator": agreement(annotation_root, second_root, records) if second_root else None,
         "warnings": warnings,
     }
@@ -552,6 +711,14 @@ def main() -> None:
             for kind in ("roles", "relations"):
                 item = kinds[kind]
                 writer.writerow(["hybrid", "full", method, kind, item["precision"], item["recall"], item["f1"], kinds["videos"]])
+        if ppi_summary.get("status") == "complete":
+            for method, kinds in ppi_summary["methods"].items():
+                for kind in ("roles", "relations"):
+                    item = kinds[kind]
+                    writer.writerow([
+                        "ppi", "full", method, kind, item["precision"], item["recall"],
+                        item["f1"], ppi_summary["population_videos"],
+                    ])
     print(f"Wrote {output} and {output.with_suffix('.csv')}")
     print(
         f"Human complete: {complete_human}; VLM-only complete: {vlm_videos}; "

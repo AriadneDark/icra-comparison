@@ -6,7 +6,10 @@ from hybrid_common import (
     intervals_from_frames, load_ontology,
 )
 from normalize import normalize_ours, normalize_sgego, normalize_svg2
-from report_hybrid_evaluation import human_sampled_episode_counts, interval_iou
+from prepare_hybrid_evaluation import proportional_stratified_sample
+from report_hybrid_evaluation import (
+    human_sampled_episode_counts, interval_iou, prediction_powered_metrics,
+)
 from run_vlm_evaluation import (
     is_local_endpoint, messages_for_model, model_request_args, reference_from_verdicts,
     sanitize_proposal, sanitize_verdicts, verifier_visual_plan,
@@ -85,6 +88,54 @@ class MetricTests(unittest.TestCase):
 
 
 class HybridEvaluationTests(unittest.TestCase):
+    def test_primary_sample_covers_each_stratum_for_ppi(self):
+        records = [
+            {"video_id": f"a{i}", "dataset_name": "a", "task_family": "pick"}
+            for i in range(5)
+        ] + [
+            {"video_id": f"b{i}", "dataset_name": "b", "task_family": "pour"}
+            for i in range(3)
+        ]
+        import random
+        selected = proportional_stratified_sample(records, 5, random.Random(7))
+        counts = {}
+        for record in selected:
+            key = (record["dataset_name"], record["task_family"])
+            counts[key] = counts.get(key, 0) + 1
+        self.assertGreaterEqual(counts[("a", "pick")], 2)
+        self.assertGreaterEqual(counts[("b", "pour")], 2)
+
+    def test_video_level_ppi_corrects_systematic_judge_bias(self):
+        records = [
+            {
+                "video_id": str(index), "dataset_name": "set", "task_family": "pick",
+                "evaluation_split": "human_primary" if index < 2 else "vlm_only",
+            }
+            for index in range(4)
+        ]
+        pseudo = {
+            str(index): {
+                method: {kind: (0.25, 0.75, 0.0) for kind in ("roles", "relations")}
+                for method in ("ours", "sg_ego", "svg2")
+            }
+            for index in range(4)
+        }
+        human = {
+            "0": {
+                method: {kind: (1.0, 0.0, 0.0) for kind in ("roles", "relations")}
+                for method in ("ours", "sg_ego", "svg2")
+            },
+            "1": {
+                method: {kind: (0.0, 1.0, 0.0) for kind in ("roles", "relations")}
+                for method in ("ours", "sg_ego", "svg2")
+            },
+        }
+        result = prediction_powered_metrics(records, pseudo, human, seed=3, bootstrap_samples=50)
+        metric = result["methods"]["ours"]["relations"]
+        self.assertEqual(result["status"], "complete")
+        self.assertAlmostEqual(metric["precision"], 0.5)
+        self.assertAlmostEqual(metric["recall"], 1.0)
+
     def test_strict_ontology_maps_aliases_and_drops_unknown_relations(self):
         ontology = load_ontology("predicate_ontology.json")
         self.assertEqual(canonical_predicate("Pick up", ontology), "holding")
