@@ -1,17 +1,56 @@
 {
-  "holding": ["hold", "holds", "grasp", "grasping", "grips", "gripping", "carrying"],
+  "_drop_unknown": true,
+  "holding": [
+    "hold", "holds", "grasp", "grasps", "grasping", "grips", "gripping",
+    "grab", "grabs", "grabbing", "pick", "picks", "picking", "pick up",
+    "picks up", "picking up", "lift", "lifts", "lifting", "carry", "carries",
+    "carrying"
+  ],
   "touching": ["touch", "touches", "in contact with", "contacting"],
-  "on": ["on top of", "supported by", "resting on", "sits on", "placed on"],
+  "on": [
+    "on top of", "supported by", "resting on", "rests on", "rest on", "sits on",
+    "standing on", "mounted on", "placed on"
+  ],
   "inside": ["in", "contained in", "within"],
-  "above": ["over", "on top of without contact"],
-  "near": ["next to", "close to", "beside"],
-  "approaching": ["moving toward", "moves toward", "moving towards", "approaches"],
+  "above": [
+    "over", "on top of without contact", "positioned above", "positioned over",
+    "suspended above"
+  ],
+  "below": ["under", "underneath", "located under", "positioned below"],
+  "near": ["next to", "close to", "beside", "adjacent", "adjacent to", "positioned near"],
+  "left_of": ["left of", "to the left of"],
+  "right_of": ["right of", "to the right of"],
+  "in_front_of": ["in front of", "ahead of"],
+  "behind": ["behind", "in back of"],
+  "attached_to": ["attached to", "connected to", "hanging from"],
+  "supporting": ["support", "supports"],
+  "approaching": [
+    "approach", "approaches", "moving toward", "moves toward", "moving towards",
+    "moves towards", "move toward", "move towards", "moving to", "toward", "towards",
+    "being moved toward"
+  ],
   "moving_away": ["moving away", "moves away", "receding from"],
-  "placing_on": ["place on", "places on", "put on", "puts on", "placing onto"],
-  "placing_in": ["place in", "places in", "put inside", "puts inside", "inserting into"],
-  "removing_from": ["remove from", "removes from", "taking from", "lifting from"],
-  "releasing": ["release", "releases", "letting go of"],
+  "reaching_for": [
+    "reach for", "reaches for", "reaching for", "reaching", "reaches toward",
+    "reaching toward", "reaching towards"
+  ],
+  "placing": ["place", "places", "placing", "put", "puts", "put down", "puts down"],
+  "placing_on": [
+    "place on", "places on", "put on", "puts on", "placing onto", "stack", "stacks",
+    "stacking", "stacked on"
+  ],
+  "placing_in": [
+    "place in", "places in", "put inside", "puts inside", "insert", "inserts",
+    "inserting", "inserting into", "placed into", "being placed into"
+  ],
+  "removing_from": [
+    "remove from", "removes from", "taking from", "lifting from", "lifted from",
+    "pulled from", "being pulled from"
+  ],
+  "releasing": ["release", "releases", "letting go", "letting go of", "drop", "drops"],
+  "pouring": ["pour", "pours", "pouring", "pours into", "pouring into"],
   "opening": ["open", "opens"],
   "closing": ["close", "closes"],
+  "pushing": ["push", "pushes"],
   "moving": ["move", "moves", "transporting"]
 }

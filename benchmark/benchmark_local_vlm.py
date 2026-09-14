@@ -14,6 +14,7 @@ from typing import Any
 import cv2
 from PIL import Image
 
+from hybrid_common import load_ontology, ontology_predicates
 from run_vlm_evaluation import model_request_args, proposer_prompt, sample_indices
 
 
@@ -75,6 +76,10 @@ def main() -> None:
     parser.add_argument("--frames", type=int, default=10)
     parser.add_argument("--timeout", type=float, default=300.0)
     parser.add_argument("--max-output-tokens", type=int, default=2048)
+    parser.add_argument(
+        "--ontology", default=str(Path(__file__).with_name("predicate_ontology.json")),
+        help="Closed predicate ontology used by the production evaluator",
+    )
     args = parser.parse_args()
 
     source = Path(args.video).resolve()
@@ -105,7 +110,11 @@ def main() -> None:
         {"type": "text", "text": f"Image {position} is original frame {frame_index}."}
         for position, frame_index in enumerate(indices, 1)
     )
-    content.append({"type": "text", "text": proposer_prompt(args.goal, frame_count, indices)})
+    ontology = load_ontology(args.ontology)
+    content.append({
+        "type": "text",
+        "text": proposer_prompt(args.goal, frame_count, indices, ontology_predicates(ontology)),
+    })
     preprocessing_seconds = time.perf_counter() - preprocessing_started
 
     request_args = model_request_args(model)

@@ -168,6 +168,15 @@ def main() -> None:
         "episodes": records,
     }
     write_json(output_root / "study_manifest.json", study)
+    write_json(output_root / "human_100_manifest.json", {
+        "schema_version": "benchmark_manifest_v1",
+        "source_manifest": str(Path(args.manifest).resolve()),
+        "selection_seed": args.seed,
+        "episodes": [
+            record for record in records
+            if record["evaluation_split"].startswith("human_")
+        ],
+    })
     (output_root / "human_annotations").mkdir(parents=True, exist_ok=True)
     (output_root / "vlm").mkdir(parents=True, exist_ok=True)
     print(
@@ -175,6 +184,7 @@ def main() -> None:
         f"{len(challenge)} challenge, {len(records) - args.human_size} VLM-only"
     )
     print(f"Study manifest: {output_root / 'study_manifest.json'}")
+    print(f"Human manifest: {output_root / 'human_100_manifest.json'}")
 
 
 if __name__ == "__main__":

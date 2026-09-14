@@ -18,12 +18,14 @@ from PIL import Image, ImageDraw
 try:
     from .hybrid_common import (
         ROLE_ORDER, canonical_predicate, episode_stem, fact_id, frames_from_intervals,
-        intervals_from_frames, load_json, load_ontology, normalize_text, parse_model_object, write_json,
+        intervals_from_frames, load_json, load_ontology, normalize_text, ontology_predicates,
+        parse_model_object, write_json,
     )
 except ImportError:
     from hybrid_common import (
         ROLE_ORDER, canonical_predicate, episode_stem, fact_id, frames_from_intervals,
-        intervals_from_frames, load_json, load_ontology, normalize_text, parse_model_object, write_json,
+        intervals_from_frames, load_json, load_ontology, normalize_text, ontology_predicates,
+        parse_model_object, write_json,
     )
 
 
@@ -150,8 +152,15 @@ def request_object(client: Any, model: str, messages: list[dict[str, Any]], retr
     raise RuntimeError(f"VLM request failed after {retries} attempts") from last_error
 
 
-def proposer_prompt(goal: str, frame_count: int, sampled_frames: list[int] | None = None) -> str:
+def proposer_prompt(
+    goal: str, frame_count: int, sampled_frames: list[int] | None = None,
+    allowed_predicates: list[str] | None = None,
+) -> str:
     sampled = sampled_frames if sampled_frames is not None else list(range(frame_count))
+    predicate_rule = (
+        "Use only one of these predicates: " + ", ".join(allowed_predicates) + "."
+        if allowed_predicates else "Use a concise visual predicate."
+    )
     return f"""Analyze this robot-manipulation video using only visible evidence.
 
 Planning goal: {goal}
@@ -159,7 +168,7 @@ The original video has {frame_count} frames numbered 0 through {frame_count - 1}
 You are shown only original frames: {sampled}.
 
 Identify only these task roles: robot, manipulated_object, initial_support, target.
-Then list visually supported directed relations between those roles. Use concise predicates and
+Then list visually supported directed relations between those roles. {predicate_rule}
 list only shown frame numbers where each fact is directly visible. Never infer unshown frames.
 Do not infer that the goal succeeded merely from its text.
 
@@ -416,7 +425,9 @@ def process_episode(
     proposal_raw = request_object(client, model, [{
         "role": "user",
         "content": visual_content(
-            proposer_prompt(record["planning_goal"], len(images), indices), selected, indices
+            proposer_prompt(
+                record["planning_goal"], len(images), indices, ontology_predicates(ontology)
+            ), selected, indices
         ),
     }], retries)
     proposal = sanitize_proposal(proposal_raw, len(images), ontology, indices)

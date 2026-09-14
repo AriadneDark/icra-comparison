@@ -56,7 +56,9 @@ is independent of those Qwen generators.
 This command:
 
 - normalizes all three output formats;
-- maps predicate aliases through `benchmark/predicate_ontology.json`;
+- maps predicate aliases through the closed vocabulary in
+  `benchmark/predicate_ontology.json`, merges action synonyms (for example,
+  `grab`/`pick up`/`lift` into `holding`), and drops free-form or self-relations;
 - collapses frame facts into inclusive temporal intervals;
 - creates the blind union of method claims;
 - computes three-way disagreement;
@@ -66,6 +68,7 @@ Outputs are under `$EVAL_ROOT`:
 
 ```text
 study_manifest.json
+human_100_manifest.json
 candidates/<video_id>.json
 human_annotations/
 vlm/
@@ -82,6 +85,19 @@ The selection is deterministic (`--seed 20260911`). To change sizes:
 ```
 
 Do not regenerate the study manifest after annotation begins.
+
+The ontology is deliberately strict because arbitrary generated phrases create
+near-duplicate claims and inflate human annotation time. Add a genuinely needed
+visual relation and its aliases to `predicate_ontology.json` before freezing the
+study. Unknown predicates are excluded when `_drop_unknown` is `true`.
+
+`human_100_manifest.json` is generated automatically and can be used to create
+only the MP4 files needed by the annotation UI:
+
+```bash
+BENCHMARK_MANIFEST="$EVAL_ROOT/human_100_manifest.json" \
+  ./benchmark/docker-run.sh prepare --expected-count 100
+```
 
 ## 3. Run the VLM proposer and verifier
 

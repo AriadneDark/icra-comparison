@@ -18,6 +18,7 @@ except ImportError:
 
 ROLE_ORDER = ("robot", "manipulated_object", "initial_support", "target")
 METHODS = ("ours", "sg_ego", "svg2")
+STRICT_ONTOLOGY_KEY = "\0drop_unknown"
 
 
 def load_json(path: str | Path) -> Any:
@@ -47,7 +48,15 @@ def load_ontology(path: str | Path | None) -> dict[str, str]:
     if path is None:
         return aliases
     payload = load_json(path)
+    if not isinstance(payload, dict):
+        raise ValueError("Predicate ontology must be a JSON object")
+    if payload.get("_drop_unknown") is True:
+        aliases[STRICT_ONTOLOGY_KEY] = "true"
     for canonical, values in payload.items():
+        if canonical.startswith("_"):
+            continue
+        if not isinstance(values, list):
+            raise ValueError(f"Aliases for predicate {canonical!r} must be a list")
         aliases[normalize_text(canonical)] = normalize_text(canonical)
         for value in values:
             aliases[normalize_text(value)] = normalize_text(canonical)
@@ -56,7 +65,14 @@ def load_ontology(path: str | Path | None) -> dict[str, str]:
 
 def canonical_predicate(value: str, ontology: dict[str, str]) -> str:
     normalized = normalize_text(value)
-    return ontology.get(normalized, normalized)
+    if normalized in ontology:
+        return ontology[normalized]
+    return "" if ontology.get(STRICT_ONTOLOGY_KEY) == "true" else normalized
+
+
+def ontology_predicates(ontology: dict[str, str]) -> list[str]:
+    """Return the closed set of canonical predicates exposed to the judge."""
+    return sorted({value for key, value in ontology.items() if key != STRICT_ONTOLOGY_KEY})
 
 
 def intervals_from_frames(frame_ids: Iterable[int]) -> list[list[int]]:
@@ -96,7 +112,14 @@ def collapse_graph(graph: dict[str, Any], ontology: dict[str, str]) -> dict[str,
         for edge in frame.get("edges", []):
             if len(edge) != 3 or edge[0] not in ROLES or edge[2] not in ROLES:
                 continue
-            key = (edge[0], canonical_predicate(edge[1], ontology), edge[2])
+            # The four role nodes denote distinct task entities. Self-edges do
+            # not express a useful role-to-role fact and only burden annotation.
+            if edge[0] == edge[2]:
+                continue
+            predicate = canonical_predicate(edge[1], ontology)
+            if not predicate:
+                continue
+            key = (edge[0], predicate, edge[2])
             relation_frames[key].append(frame_index)
     return {
         "frame_count": int(graph["frame_count"]),

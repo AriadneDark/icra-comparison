@@ -1,7 +1,10 @@
 import unittest
 
 from evaluate import compare_episode
-from hybrid_common import build_candidates, frames_from_intervals, intervals_from_frames
+from hybrid_common import (
+    build_candidates, canonical_predicate, collapse_graph, frames_from_intervals,
+    intervals_from_frames, load_ontology,
+)
 from normalize import normalize_ours, normalize_sgego, normalize_svg2
 from report_hybrid_evaluation import human_sampled_episode_counts, interval_iou
 from run_vlm_evaluation import (
@@ -82,6 +85,23 @@ class MetricTests(unittest.TestCase):
 
 
 class HybridEvaluationTests(unittest.TestCase):
+    def test_strict_ontology_maps_aliases_and_drops_unknown_relations(self):
+        ontology = load_ontology("predicate_ontology.json")
+        self.assertEqual(canonical_predicate("Pick up", ontology), "holding")
+        self.assertEqual(canonical_predicate("move cup to plate", ontology), "")
+        graph = {"frame_count": 1, "frames": [{
+            "frame_index": 0, "nodes": ["robot", "manipulated_object"],
+            "edges": [
+                ["robot", "grab", "manipulated_object"],
+                ["robot", "intended for", "manipulated_object"],
+                ["robot", "moving", "robot"],
+            ],
+        }]}
+        self.assertEqual(collapse_graph(graph, ontology)["relations"], [{
+            "subject": "robot", "predicate": "holding", "object": "manipulated_object",
+            "intervals": [[0, 0]],
+        }])
+
     def test_local_judge_endpoint_needs_no_real_api_key(self):
         self.assertTrue(is_local_endpoint("http://gemma-judge:8000/v1"))
         self.assertTrue(is_local_endpoint("http://127.0.0.1:8000/v1"))
