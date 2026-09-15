@@ -33,6 +33,15 @@ def add_counts(first: tuple[float, float, float], second: tuple[float, float, fl
     return tuple(a + b for a, b in zip(first, second))  # type: ignore[return-value]
 
 
+def vlm_has_usable_verdict(payload: dict[str, Any]) -> bool:
+    """A technical success needs at least one determinate shown-frame verdict."""
+    return any(
+        label in {"yes", "no"}
+        for verdict in payload.get("verdicts", [])
+        for label in verdict.get("frame_verdicts", {}).values()
+    )
+
+
 def interval_iou(first: list[list[int]], second: list[list[int]]) -> float | None:
     a = {frame for start, end in first for frame in range(min(start, end), max(start, end) + 1)}
     b = {frame for start, end in second for frame in range(min(start, end), max(start, end) + 1)}
@@ -503,7 +512,14 @@ def main() -> None:
         if path.exists() and load_json(path).get("invalid_video"):
             invalid_human_records.append(record)
     invalid_ids = {record["video_id"] for record in invalid_human_records}
-    records = [record for record in all_records if record["video_id"] not in invalid_ids]
+    unusable_vlm_records: list[dict[str, Any]] = []
+    for record in all_records:
+        path = study_root / "vlm" / f"{record['video_id']}.json"
+        if path.exists() and not vlm_has_usable_verdict(load_json(path)):
+            unusable_vlm_records.append(record)
+    unusable_vlm_ids = {record["video_id"] for record in unusable_vlm_records}
+    excluded_ids = invalid_ids | unusable_vlm_ids
+    records = [record for record in all_records if record["video_id"] not in excluded_ids]
     calibration, confusion = calibration_table(records, study_root, annotation_root, ontology)
 
     human_per_video: dict[str, dict[str, list[tuple[float, float, float]]]] = {
@@ -682,6 +698,10 @@ def main() -> None:
         warnings.append(
             f"{len(invalid_human_records)} human videos were marked invalid and excluded from all metrics."
         )
+    if unusable_vlm_records:
+        warnings.append(
+            f"{len(unusable_vlm_records)} videos had no determinate Gemma verdicts and were excluded from all metrics."
+        )
     if vlm_videos < expected_vlm_only:
         warnings.append(
             f"Only {vlm_videos}/{expected_vlm_only} VLM-only tasks are complete; missing videos are omitted."
@@ -703,6 +723,8 @@ def main() -> None:
         "human_complete_videos": complete_human,
         "human_invalid_videos": len(invalid_human_records),
         "human_invalid_video_ids": sorted(invalid_ids),
+        "unusable_vlm_videos": len(unusable_vlm_records),
+        "unusable_vlm_video_ids": sorted(unusable_vlm_ids),
         "human_sampled_complete_videos": human_sampled_videos,
         "human_sampled_checkpoints": human_sampled_checkpoints,
         "vlm_only_complete_videos": vlm_videos,

@@ -243,6 +243,9 @@ $EVAL_ROOT/reports/hybrid_metrics.csv
 
 The JSON contains:
 
+- explicit exclusion counts and ids for human-marked invalid videos and
+  technical Gemma failures (no `yes` or `no` verdict on any displayed frame);
+  a valid Gemma `no` answer remains in the evaluation;
 - `human_metrics.human_primary`: unbiased headline scores;
 - `human_metrics.human_challenge`: difficult-case diagnostics;
 - `human_sampled_metrics`: exact human truth restricted to judge checkpoints;

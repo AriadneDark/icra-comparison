@@ -12,7 +12,7 @@ from normalize import normalize_ours, normalize_sgego, normalize_svg2
 from prepare_hybrid_evaluation import proportional_stratified_sample
 from report_hybrid_evaluation import (
     human_frame_label, human_sampled_episode_counts, interval_iou,
-    prediction_powered_metrics,
+    prediction_powered_metrics, vlm_has_usable_verdict,
 )
 from run_vlm_evaluation import (
     is_local_endpoint, messages_for_model, model_request_args, reference_from_verdicts,
@@ -106,6 +106,14 @@ class MetricTests(unittest.TestCase):
 
 
 class HybridEvaluationTests(unittest.TestCase):
+    def test_vlm_failure_requires_no_determinate_frame_verdicts(self):
+        self.assertFalse(vlm_has_usable_verdict({"verdicts": [{
+            "frame_verdicts": {"0": "uncertain", "3": "uncertain"},
+        }]}))
+        self.assertTrue(vlm_has_usable_verdict({"verdicts": [{
+            "frame_verdicts": {"0": "uncertain", "3": "no"},
+        }]}))
+
     def test_invalid_video_can_be_completed_without_fact_labels(self):
         import tempfile
         from pathlib import Path
