@@ -63,7 +63,10 @@ def run_batch(
             results.append({"relative_path": str(output.relative_to(output_root)), "status": "failed", "error": f"{type(error).__name__}: {error}"})
             output.mkdir(parents=True, exist_ok=True)
             update_run_report(output, stage, "failed", {"error": f"{type(error).__name__}: {error}"})
-            if fail_fast:
+            # Continuing after CUDA OOM usually produces many invalid scenes
+            # while a competing GPU process still owns the memory. Stop the
+            # batch immediately; completed scenes remain resumable.
+            if fail_fast or "CUDA out of memory" in str(error) or type(error).__name__ == "OutOfMemoryError":
                 raise
     summary = {
         "schema_version": "goal_guided_segmentation_batch_report_v1",

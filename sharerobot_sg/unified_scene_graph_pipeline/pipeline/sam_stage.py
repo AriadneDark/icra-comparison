@@ -1098,6 +1098,11 @@ def segment(output: Path, config: dict[str, Any], overwrite: bool = False, model
                     else:
                         raise ValueError(f"Unsupported {backend} prompt mode: {prompt_mode}")
             except Exception as error:
+                # An OOM is a process-level resource failure, not a valid
+                # "object not found" result. Never convert it into an empty
+                # track and then mark the whole scene successful.
+                if isinstance(error, torch.OutOfMemoryError) or "CUDA out of memory" in str(error):
+                    raise
                 traceback.print_exc()
                 masks, track = {}, {
                     "status": "segmentation_failed",
