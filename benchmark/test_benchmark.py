@@ -9,7 +9,8 @@ from hybrid_common import (
 from normalize import normalize_ours, normalize_sgego, normalize_svg2
 from prepare_hybrid_evaluation import proportional_stratified_sample
 from report_hybrid_evaluation import (
-    human_sampled_episode_counts, interval_iou, prediction_powered_metrics,
+    human_frame_label, human_sampled_episode_counts, interval_iou,
+    prediction_powered_metrics,
 )
 from run_vlm_evaluation import (
     is_local_endpoint, messages_for_model, model_request_args, reference_from_verdicts,
@@ -300,6 +301,20 @@ class HybridEvaluationTests(unittest.TestCase):
         }
         counts = human_sampled_episode_counts([fact], annotation, {}, [0, 5, 9])
         self.assertEqual(counts["ours"]["relations"], (1.0, 2.0, 0.0))
+
+    def test_wrong_role_box_frame_is_excluded_by_track_interval(self):
+        fact = {
+            "id": "track", "kind": "role", "role": "robot", "label": "arm",
+            "sources": ["ours"], "source_intervals": {"ours": [[0, 2]]},
+        }
+        annotation = {
+            "roles": {"robot": {"status": "present", "visible_intervals": [[0, 2]]}},
+            "claim_labels": {"track": {"label": "yes", "intervals": [[0, 0], [2, 2]]}},
+            "missing_relations": [],
+        }
+        self.assertEqual(human_frame_label(fact, annotation, 1), "no")
+        counts = human_sampled_episode_counts([fact], annotation, {}, [0, 1, 2])
+        self.assertEqual(counts["ours"]["roles"], (2.0, 1.0, 1.0))
 
 
 if __name__ == "__main__":

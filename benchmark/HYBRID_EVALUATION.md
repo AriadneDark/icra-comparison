@@ -201,7 +201,8 @@ The annotator must:
 
 - identify the canonical visible object for all four roles;
 - mark every blind candidate claim `yes`, `no`, or `uncertain`;
-- correct relation intervals;
+- correct intervals for relations and role tracks; for a role claim, retain
+  only frames where its box follows the correct role object;
 - add relations missed by the entire candidate pool;
 - mark the task complete.
 

@@ -174,7 +174,11 @@ def human_frame_label(
             return "no"
         if status != "present":
             return None
-        return "yes" if interval_contains(role.get("visible_intervals", []), frame_index) else "no"
+        role_visible = interval_contains(role.get("visible_intervals", []), frame_index)
+        track_correct = interval_contains(
+            claim.get("intervals") or role.get("visible_intervals", []), frame_index
+        )
+        return "yes" if role_visible and track_correct else "no"
     return "yes" if interval_contains(claim.get("intervals", []), frame_index) else "no"
 
 
@@ -204,7 +208,15 @@ def human_sampled_episode_counts(
                 )
                 candidates = [fact for fact in role_facts if fact["role"] == role_name]
                 active = [fact for fact in candidates if source_active(fact, method, frame_index)]
-                correct = any(labels.get(fact["id"], {}).get("label") == "yes" for fact in active)
+                correct = any(
+                    labels.get(fact["id"], {}).get("label") == "yes"
+                    and interval_contains(
+                        labels.get(fact["id"], {}).get("intervals")
+                        or role.get("visible_intervals", []),
+                        frame_index,
+                    )
+                    for fact in active
+                )
                 value = (
                     1.0 if expected and correct else 0.0,
                     1.0 if active and not (expected and correct) else 0.0,
