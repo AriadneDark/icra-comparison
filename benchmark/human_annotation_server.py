@@ -36,15 +36,17 @@ input[type=text]{width:95%;padding:5px;background:#111;color:#eee;border:1px sol
 .goal{font-size:1.1rem;color:#ffe08a}.muted{color:#aaa}.yes{color:#8ee28e}.no{color:#ff9696}.uncertain{color:#ffd27a}
 .fact{font-family:ui-monospace,monospace}.nav{display:flex;align-items:center;gap:8px}.nav input{width:70px}.status{margin-left:auto}
 .quick{font-size:13px;padding:3px 7px}.fastbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.excluded img{opacity:.28;border:3px solid #ff5f5f}.excluded figcaption{color:#ff9696}.evidence figure{cursor:pointer}
+.invalid-card{border:2px solid #d75a5a;background:#352326}.invalid-card button{background:#a93232;color:white;border:1px solid #ef7777;border-radius:4px}.invalid-video .labeling{opacity:.3;pointer-events:none}.invalid-banner{display:none;color:#ffaaaa;font-weight:700}.invalid-video .invalid-banner{display:inline}
 </style></head><body>
 <header><div class="nav"><button onclick="move(-1)">← Previous</button><input id="idx" type="number" min="1" onchange="jump()"><span id="total"></span><button onclick="move(1)">Next →</button><button onclick="save()">Save</button><button onclick="finishNext()">Complete + Save + Next (Ctrl+Enter)</button><span class="status" id="status"></span></div></header>
 <main><h2 id="title"></h2><div class="goal" id="goal"></div><p class="muted">Judge only visible evidence. Method identities are hidden. Mark Complete only after adding facts missed by every candidate.</p>
+<section class="card invalid-card"><strong>Invalid video/task pair</strong><p class="muted">Use this only when the planning goal does not describe this video, or the video itself cannot be evaluated. The whole video will be excluded from every metric.</p><label><input id="invalidVideo" type="checkbox" onchange="toggleInvalid()"> Exclude this entire video</label> <select id="invalidReason"><option value="goal_video_mismatch">Goal and video do not match</option><option value="corrupted_or_unreadable">Video is corrupted or unreadable</option><option value="wrong_or_incomplete_video">Wrong or incomplete video</option><option value="duplicate">Duplicate video</option><option value="other">Other — explain in Notes</option></select> <button onclick="invalidateNext()">Mark invalid + Save + Next</button> <span class="invalid-banner">This video will not enter the evaluation.</span></section>
 <section class="card fastbar"><strong>Fast mode</strong><button onclick="applyGemma()">Apply Gemma prelabels to empty fields</button><span class="muted">Then review and correct them. Click a boxed frame to include/exclude it.</span></section>
 <video id="video" controls preload="metadata"></video>
-<section class="card"><h3>Ground-truth roles</h3><table><thead><tr><th>Role</th><th>Canonical visible object</th><th>Status</th><th>Visible intervals</th></tr></thead><tbody id="roles"></tbody></table></section>
-<section class="card"><h3>Candidate role tracks (boxes)</h3><p class="muted">Judge the highlighted box. Keep only intervals where it follows the correct role object; exclude frames with a wrong box.</p><table><thead><tr><th>Blind role claim and box samples</th><th>Verdict</th><th>Frames with correct box</th></tr></thead><tbody id="roleFacts"></tbody></table></section>
-<section class="card"><h3>Candidate relations</h3><p class="muted">Judge the relation from the video itself. Intervals here mean frames where the relation is true, not where a detector box is correct.</p><table><thead><tr><th>Blind relation claim</th><th>Verdict</th><th>Frames where relation is true</th></tr></thead><tbody id="relationFacts"></tbody></table></section>
-<section class="card"><h3>Facts missed by the candidate pool</h3><p class="muted">One relation per line: subject | predicate | object | 0-8,20-29</p><textarea id="missing"></textarea></section>
+<section class="card labeling"><h3>Ground-truth roles</h3><table><thead><tr><th>Role</th><th>Canonical visible object</th><th>Status</th><th>Visible intervals</th></tr></thead><tbody id="roles"></tbody></table></section>
+<section class="card labeling"><h3>Candidate role tracks (boxes)</h3><p class="muted">Judge the highlighted box. Keep only intervals where it follows the correct role object; exclude frames with a wrong box.</p><table><thead><tr><th>Blind role claim and box samples</th><th>Verdict</th><th>Frames with correct box</th></tr></thead><tbody id="roleFacts"></tbody></table></section>
+<section class="card labeling"><h3>Candidate relations</h3><p class="muted">Judge the relation from the video itself. Intervals here mean frames where the relation is true, not where a detector box is correct.</p><table><thead><tr><th>Blind relation claim</th><th>Verdict</th><th>Frames where relation is true</th></tr></thead><tbody id="relationFacts"></tbody></table></section>
+<section class="card labeling"><h3>Facts missed by the candidate pool</h3><p class="muted">One relation per line: subject | predicate | object | 0-8,20-29</p><textarea id="missing"></textarea></section>
 <section class="card"><label>Notes<br><textarea id="notes"></textarea></label><br><label><input id="complete" type="checkbox"> Annotation complete</label></section>
 </main><script>
 let tasks=[], current=0, task=null;
@@ -52,12 +54,13 @@ const roles=['robot','manipulated_object','initial_support','target'];
 const idx=document.getElementById('idx'), title=document.getElementById('title'), goal=document.getElementById('goal');
 const video=document.getElementById('video'), missing=document.getElementById('missing'), notes=document.getElementById('notes');
 const complete=document.getElementById('complete'), status=document.getElementById('status');
+const invalidVideo=document.getElementById('invalidVideo'), invalidReason=document.getElementById('invalidReason');
 async function init(){tasks=await (await fetch('/api/tasks')).json();document.getElementById('total').textContent='/ '+tasks.length;await load(0)}
 function esc(x){return String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 async function load(i){if(i<0||i>=tasks.length)return;current=i;task=await (await fetch('/api/task?index='+i)).json();idx.value=i+1;title.textContent=task.relative_path+' ['+task.evaluation_split+']';goal.textContent='Goal: '+task.planning_goal;video.src='/media/video?index='+i;
  let a=task.annotation||{}, gr=a.roles||{};rolesBody='';for(const r of roles){const v=gr[r]||{}, selectedStatus=v.status||'ambiguous';rolesBody+=`<tr><td>${r}</td><td><input id="role_${r}_label" type="text" value="${esc(v.label||'')}"></td><td><select id="role_${r}_status">${['present','not_visible','not_applicable','ambiguous'].map(x=>`<option ${selectedStatus===x?'selected':''}>${x}</option>`)}</select></td><td><input id="role_${r}_intervals" type="text" placeholder="0-29" value="${esc(formatIntervals(v.visible_intervals||[]))}"> <button class="quick" onclick="setGroundTruthAll('${r}')">present all</button></td></tr>`}document.getElementById('roles').innerHTML=rolesBody;
  let labels=a.claim_labels||{}, roleRows='', relationRows='';for(const f of task.facts){let d=f.kind==='role'?`${f.role} is “${f.label}”`:`${f.subject} --${f.predicate}--> ${f.object}`;let v=labels[f.id]||{};let evidence=f.evidence_boxes||[];let pics=f.kind==='role'?evidence.map(e=>`<figure data-claim="${f.id}" data-frame="${e.frame_index}" onclick="toggleFrame('${f.id}',${e.frame_index})"><img loading="lazy" src="/media/evidence?index=${i}&claim_id=${encodeURIComponent(f.id)}&frame=${e.frame_index}"><figcaption>frame ${e.frame_index}</figcaption></figure>`).join(''):'';if(f.kind==='role'&&!evidence.length)pics='<div class="muted">Semantic proposal only — no detector track or box. Judge whether this role identification exists in the video.</div>';let suggested=formatIntervals(f.suggested_intervals||[]),boxed=formatIntervals(intervalsFromSet(new Set(evidence.map(e=>Number(e.frame_index))))),initial=v.intervals?formatIntervals(v.intervals):(f.kind==='role'&&evidence.length?boxed:suggested);let quick=f.kind==='role'&&evidence.length?`<button class="quick" onclick="setClaim('${f.id}','yes','boxed')">yes boxed frames</button><button class="quick" onclick="setClaim('${f.id}','yes','all')">yes 0-${task.frame_count-1}</button><button class="quick" onclick="setClaim('${f.id}','no','clear')">no</button>`:`<button class="quick" onclick="setClaim('${f.id}','yes','suggested')">yes predicted</button><button class="quick" onclick="setClaim('${f.id}','yes','all')">yes 0-${task.frame_count-1}</button><button class="quick" onclick="setClaim('${f.id}','no','clear')">no</button>`;let row=`<tr><td class="fact">${esc(d)}<div class="muted">${f.id}</div><div class="evidence">${pics}</div></td><td>${['yes','no','uncertain'].map(x=>`<label class="${x}"><input type="radio" name="claim_${f.id}" value="${x}" ${v.label===x?'checked':''}>${x}</label><br>`).join('')}<div>${quick}</div></td><td><input id="interval_${f.id}" data-suggested="${esc(suggested)}" data-boxed="${esc(boxed)}" type="text" value="${esc(initial)}" oninput="refreshEvidence('${f.id}')"></td></tr>`;if(f.kind==='role')roleRows+=row;else relationRows+=row}document.getElementById('roleFacts').innerHTML=roleRows||'<tr><td colspan="3" class="muted">No candidate role tracks.</td></tr>';document.getElementById('relationFacts').innerHTML=relationRows||'<tr><td colspan="3" class="muted">No candidate relations.</td></tr>';for(const f of task.facts)if(f.kind==='role')refreshEvidence(f.id);
- missing.value=(a.missing_relations||[]).map(x=>`${x.subject} | ${x.predicate} | ${x.object} | ${formatIntervals(x.intervals||[])}`).join('\n');notes.value=a.notes||'';complete.checked=!!a.complete;status.textContent=a.complete?'✓ complete':'not saved/unfinished'}
+ missing.value=(a.missing_relations||[]).map(x=>`${x.subject} | ${x.predicate} | ${x.object} | ${formatIntervals(x.intervals||[])}`).join('\n');notes.value=a.notes||'';complete.checked=!!a.complete;invalidVideo.checked=!!a.invalid_video;invalidReason.value=a.invalid_reason||'goal_video_mismatch';toggleInvalid();status.textContent=a.invalid_video?'⚠ excluded as invalid':(a.complete?'✓ complete':'not saved/unfinished')}
 function formatIntervals(xs){return xs.map(x=>x[0]+'-'+x[1]).join(',')}
 function parseIntervals(text){if(!text.trim())return[];return text.split(',').map(x=>{let p=x.trim().split('-').map(Number);if(p.length!==2||p.some(Number.isNaN))throw Error('Bad interval: '+x);return [Math.min(...p),Math.max(...p)]})}
 function intervalSet(text){let out=new Set();for(const [a,b] of parseIntervals(text))for(let i=a;i<=b;i++)out.add(i);return out}
@@ -68,7 +71,9 @@ function setClaim(id,label,mode){document.querySelector(`input[name="claim_${id}
 function setGroundTruthAll(role){document.getElementById('role_'+role+'_status').value='present';document.getElementById('role_'+role+'_intervals').value=`0-${task.frame_count-1}`}
 function applyGemma(){for(const r of roles){let s=(task.role_suggestions||{})[r];if(!s)continue;let label=document.getElementById('role_'+r+'_label'),state=document.getElementById('role_'+r+'_status'),span=document.getElementById('role_'+r+'_intervals');if(!label.value.trim()){label.value=s.label;state.value='present';span.value=`0-${task.frame_count-1}`}}for(const f of task.facts){let checked=document.querySelector(`input[name="claim_${f.id}"]:checked`);if(checked)continue;let s=(task.vlm_suggestions||{})[f.id];if(!s)continue;document.querySelector(`input[name="claim_${f.id}"][value="${s.label}"]`).checked=true;if(s.label==='no')document.getElementById('interval_'+f.id).value='';refreshEvidence(f.id)}status.textContent='Gemma prelabels applied — review before completing'}
 function parseMissing(){let out=[];for(const line of missing.value.split('\n')){if(!line.trim())continue;let p=line.split('|').map(x=>x.trim());if(p.length!==4||!roles.includes(p[0])||!roles.includes(p[2]))throw Error('Bad missing relation: '+line);out.push({subject:p[0],predicate:p[1],object:p[2],intervals:parseIntervals(p[3])})}return out}
-async function save(){try{let annotation={video_id:task.video_id,annotator:task.annotator,complete:complete.checked,roles:{},claim_labels:{},missing_relations:parseMissing(),notes:notes.value};for(const r of roles){annotation.roles[r]={label:document.getElementById(`role_${r}_label`).value.trim(),status:document.getElementById(`role_${r}_status`).value,visible_intervals:parseIntervals(document.getElementById(`role_${r}_intervals`).value)}}for(const f of task.facts){let radio=document.querySelector(`input[name="claim_${f.id}"]:checked`);if(radio)annotation.claim_labels[f.id]={label:radio.value,intervals:parseIntervals(document.getElementById(`interval_${f.id}`).value)}}let response=await fetch('/api/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(annotation)});if(!response.ok)throw Error(await response.text());task.annotation=annotation;tasks[current].complete=annotation.complete;status.textContent=annotation.complete?'✓ complete':'saved (unfinished)';return true}catch(e){alert(e.message);return false}}
+function toggleInvalid(){document.querySelector('main').classList.toggle('invalid-video',invalidVideo.checked);if(invalidVideo.checked)complete.checked=true}
+async function save(){try{let invalid=invalidVideo.checked;let annotation={video_id:task.video_id,annotator:task.annotator,complete:invalid||complete.checked,invalid_video:invalid,invalid_reason:invalid?invalidReason.value:null,roles:{},claim_labels:{},missing_relations:invalid?[]:parseMissing(),notes:notes.value};if(!invalid){for(const r of roles){annotation.roles[r]={label:document.getElementById(`role_${r}_label`).value.trim(),status:document.getElementById(`role_${r}_status`).value,visible_intervals:parseIntervals(document.getElementById(`role_${r}_intervals`).value)}}for(const f of task.facts){let radio=document.querySelector(`input[name="claim_${f.id}"]:checked`);if(radio)annotation.claim_labels[f.id]={label:radio.value,intervals:parseIntervals(document.getElementById(`interval_${f.id}`).value)}}}let response=await fetch('/api/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(annotation)});if(!response.ok)throw Error(await response.text());task.annotation=annotation;tasks[current].complete=annotation.complete;tasks[current].invalid_video=invalid;status.textContent=invalid?'⚠ excluded as invalid':(annotation.complete?'✓ complete':'saved (unfinished)');return true}catch(e){alert(e.message);return false}}
+async function invalidateNext(){invalidVideo.checked=true;complete.checked=true;toggleInvalid();if(await save())await load(current+1)}
 async function finishNext(){complete.checked=true;if(await save())await load(current+1)}async function move(delta){if(await save())await load(current+delta)}async function jump(){if(await save())await load(Number(idx.value)-1)}document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.key==='Enter'){e.preventDefault();finishNext()}});init();
 </script></body></html>"""
 
@@ -228,7 +233,18 @@ class AnnotationApp:
             raise ValueError("Unknown video or annotator")
         if not isinstance(payload.get("claim_labels"), dict) or not isinstance(payload.get("roles"), dict):
             raise ValueError("roles and claim_labels must be objects")
-        if payload.get("complete"):
+        if payload.get("invalid_video"):
+            allowed_reasons = {
+                "goal_video_mismatch", "corrupted_or_unreadable",
+                "wrong_or_incomplete_video", "duplicate", "other",
+            }
+            if payload.get("invalid_reason") not in allowed_reasons:
+                raise ValueError("Invalid videos need a valid exclusion reason")
+            payload["complete"] = True
+            payload["roles"] = {}
+            payload["claim_labels"] = {}
+            payload["missing_relations"] = []
+        elif payload.get("complete"):
             facts = self.facts(record)
             expected = {fact["id"] for fact in facts}
             labeled = {
@@ -259,7 +275,7 @@ class AnnotationApp:
                     and not value.get("intervals")
                 ):
                     raise ValueError(f"Accepted claim {identifier} needs corrected intervals")
-        write_json(self.annotation_path(record), {"schema_version": "human_task_graph_v1", **payload})
+        write_json(self.annotation_path(record), {"schema_version": "human_task_graph_v2", **payload})
 
     def video_path(self, index: int) -> Path:
         record = self.records[index]
@@ -293,8 +309,12 @@ def make_handler(app: AnnotationApp):
                     tasks = []
                     for record in app.records:
                         path = app.annotation_path(record)
-                        complete = bool(load_json(path).get("complete")) if path.exists() else False
-                        tasks.append({"video_id": record["video_id"], "complete": complete})
+                        annotation = load_json(path) if path.exists() else {}
+                        tasks.append({
+                            "video_id": record["video_id"],
+                            "complete": bool(annotation.get("complete")),
+                            "invalid_video": bool(annotation.get("invalid_video")),
+                        })
                     self.send_json(tasks)
                 elif parsed.path == "/api/task":
                     index = int(parse_qs(parsed.query).get("index", ["0"])[0])

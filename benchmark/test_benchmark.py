@@ -2,9 +2,10 @@ import unittest
 
 from evaluate import compare_episode
 from evaluate_object_ablations import full_track_truth, scores as object_ablation_scores
+from human_annotation_server import AnnotationApp
 from hybrid_common import (
     build_candidates, canonical_predicate, collapse_graph, frames_from_intervals,
-    intervals_from_frames, load_ontology, ontology_predicates, resolve_study_path,
+    intervals_from_frames, load_json, load_ontology, ontology_predicates, resolve_study_path,
     scoped_artifact,
 )
 from normalize import normalize_ours, normalize_sgego, normalize_svg2
@@ -105,6 +106,30 @@ class MetricTests(unittest.TestCase):
 
 
 class HybridEvaluationTests(unittest.TestCase):
+    def test_invalid_video_can_be_completed_without_fact_labels(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as directory:
+            app = AnnotationApp.__new__(AnnotationApp)
+            app.records = [{"video_id": "bad_pair"}]
+            app.annotator = "reviewer"
+            app.annotation_root = Path(directory)
+            app.save({
+                "video_id": "bad_pair", "annotator": "reviewer",
+                "complete": False, "invalid_video": True,
+                "invalid_reason": "goal_video_mismatch",
+                "roles": {"robot": {"status": "present"}},
+                "claim_labels": {"unused": {"label": "yes"}},
+                "missing_relations": [{"subject": "robot"}], "notes": "wrong goal",
+            })
+            saved = load_json(Path(directory) / "bad_pair.json")
+            self.assertTrue(saved["complete"])
+            self.assertTrue(saved["invalid_video"])
+            self.assertEqual(saved["schema_version"], "human_task_graph_v2")
+            self.assertEqual(saved["roles"], {})
+            self.assertEqual(saved["claim_labels"], {})
+            self.assertEqual(saved["missing_relations"], [])
+
     def test_study_resource_falls_back_from_host_path_to_frozen_copy(self):
         import tempfile
         from pathlib import Path

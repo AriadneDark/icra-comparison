@@ -114,6 +114,9 @@ def main() -> None:
             skipped.append(f"{video_id}: missing human annotation")
             continue
         annotation = load_json(annotation_path)
+        if annotation.get("invalid_video"):
+            skipped.append(f"{video_id}: video/task pair marked invalid")
+            continue
         if not annotation.get("complete"):
             skipped.append(f"{video_id}: human annotation is unfinished")
             continue

@@ -199,12 +199,20 @@ Then open `http://localhost:8765` locally.
 
 The annotator must:
 
+- first verify that the planning goal actually describes the displayed video;
 - identify the canonical visible object for all four roles;
 - mark every blind candidate claim `yes`, `no`, or `uncertain`;
 - correct intervals for relations and role tracks; for a role claim, retain
   only frames where its box follows the correct role object;
 - add relations missed by the entire candidate pool;
 - mark the task complete.
+
+If the goal and video do not match, the video is corrupted, or the pair cannot
+be evaluated for another data-quality reason, use **Mark invalid + Save +
+Next**. Do not label its individual roles or facts. The saved annotation records
+the exclusion reason and all reporting pipelines omit that complete video from
+calibration, PPI, human metrics, and object-ablation metrics. A wrong prediction
+or a bad candidate box is not an invalid video; those are labeled normally.
 
 For the second annotator, use another port and only the frozen 25-video overlap:
 

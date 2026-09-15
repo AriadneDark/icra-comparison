@@ -116,7 +116,7 @@ def calibration_table(
             continue
         annotation = load_json(annotation_path)
         vlm = scoped_artifact(load_json(vlm_path), ontology)
-        if not annotation.get("complete"):
+        if not annotation.get("complete") or annotation.get("invalid_video"):
             continue
         fact_by_id = {fact["id"]: fact for fact in vlm["facts"]}
         for verdict in vlm.get("verdicts", []):
@@ -465,7 +465,10 @@ def agreement(first: Path, second: Path, records: list[dict[str, Any]]) -> dict[
         a, b = first / f"{record['video_id']}.json", second / f"{record['video_id']}.json"
         if not a.exists() or not b.exists():
             continue
-        la, lb = load_json(a).get("claim_labels", {}), load_json(b).get("claim_labels", {})
+        annotation_a, annotation_b = load_json(a), load_json(b)
+        if annotation_a.get("invalid_video") or annotation_b.get("invalid_video"):
+            continue
+        la, lb = annotation_a.get("claim_labels", {}), annotation_b.get("claim_labels", {})
         for identifier in la.keys() & lb.keys():
             if la[identifier].get("label") in {"yes", "no"} and lb[identifier].get("label") in {"yes", "no"}:
                 pairs.append((la[identifier]["label"], lb[identifier]["label"]))
@@ -491,7 +494,16 @@ def main() -> None:
     study = load_json(study_root / "study_manifest.json")
     ontology = load_ontology(resolve_study_path(study_root, study["ontology"]))
     annotation_root = study_root / "human_annotations" / args.annotator
-    records = study["episodes"]
+    all_records = study["episodes"]
+    invalid_human_records: list[dict[str, Any]] = []
+    for record in all_records:
+        if not record["evaluation_split"].startswith("human_"):
+            continue
+        path = annotation_root / f"{record['video_id']}.json"
+        if path.exists() and load_json(path).get("invalid_video"):
+            invalid_human_records.append(record)
+    invalid_ids = {record["video_id"] for record in invalid_human_records}
+    records = [record for record in all_records if record["video_id"] not in invalid_ids]
     calibration, confusion = calibration_table(records, study_root, annotation_root, ontology)
 
     human_per_video: dict[str, dict[str, list[tuple[float, float, float]]]] = {
@@ -520,7 +532,7 @@ def main() -> None:
             continue
         annotation = load_json(annotation_path)
         vlm = scoped_artifact(load_json(vlm_path), ontology)
-        if not annotation.get("complete"):
+        if not annotation.get("complete") or annotation.get("invalid_video"):
             continue
         complete_human += 1
         counts = human_episode_counts(vlm["facts"], annotation, ontology)
@@ -666,6 +678,10 @@ def main() -> None:
         warnings.append(
             f"Only {complete_human}/{expected_human} human tasks are complete; incomplete human videos are omitted."
         )
+    if invalid_human_records:
+        warnings.append(
+            f"{len(invalid_human_records)} human videos were marked invalid and excluded from all metrics."
+        )
     if vlm_videos < expected_vlm_only:
         warnings.append(
             f"Only {vlm_videos}/{expected_vlm_only} VLM-only tasks are complete; missing videos are omitted."
@@ -685,6 +701,8 @@ def main() -> None:
             "unobserved_frames": "excluded; never inferred from adjacent sampled frames",
         },
         "human_complete_videos": complete_human,
+        "human_invalid_videos": len(invalid_human_records),
+        "human_invalid_video_ids": sorted(invalid_ids),
         "human_sampled_complete_videos": human_sampled_videos,
         "human_sampled_checkpoints": human_sampled_checkpoints,
         "vlm_only_complete_videos": vlm_videos,
