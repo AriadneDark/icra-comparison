@@ -1,0 +1,10 @@
+{
+  "schema_version": "unified_sgg_config_override_v1",
+  "extends": "../../config.json",
+  "override": {
+    "segmenter": {"backend": "sam3"},
+    "sam3": {
+      "prompt_mode": "qwen_track_verified_text"
+    }
+  }
+}

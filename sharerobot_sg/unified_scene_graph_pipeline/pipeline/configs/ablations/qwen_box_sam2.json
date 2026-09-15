@@ -1,0 +1,10 @@
+{
+  "schema_version": "unified_sgg_config_override_v1",
+  "extends": "../../config.json",
+  "override": {
+    "segmenter": {"backend": "sam2"},
+    "sam2": {
+      "prompt_mode": "qwen_frame_boxes_chunked"
+    }
+  }
+}

@@ -1,6 +1,7 @@
 import unittest
 
 from evaluate import compare_episode
+from evaluate_object_ablations import full_track_truth, scores as object_ablation_scores
 from hybrid_common import (
     build_candidates, canonical_predicate, collapse_graph, frames_from_intervals,
     intervals_from_frames, load_ontology, ontology_predicates, resolve_study_path,
@@ -87,6 +88,20 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(result["nodes"]["recall"], 0.5)
         self.assertEqual(result["triplets"]["precision"], 0.0)
         self.assertEqual(result["triplets"]["recall"], 0.0)
+
+    def test_object_ablation_track_truth_and_scores(self):
+        from hybrid_common import fact_id
+        annotation = {"claim_labels": {
+            fact_id("role", "robot", "ours"): {
+                "label": "yes", "intervals": [[0, 1], [3, 3]],
+            }
+        }}
+        correct, uncertain = full_track_truth(annotation, "robot", 4)
+        self.assertEqual(correct, {0, 1, 3})
+        self.assertEqual(uncertain, set())
+        result = object_ablation_scores((2, 1, 2))
+        self.assertAlmostEqual(result["precision"], 2 / 3)
+        self.assertAlmostEqual(result["recall"], 0.5)
 
 
 class HybridEvaluationTests(unittest.TestCase):
