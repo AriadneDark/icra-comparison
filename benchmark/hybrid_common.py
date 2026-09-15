@@ -221,7 +221,10 @@ def _sample_evidence(entries: list[dict[str, Any]], maximum: int = 5) -> list[di
     return [entries[index] for index in indices]
 
 
-def _role_evidence(method: str, data: dict[str, Any], frame_data: dict[str, Any] | None) -> dict[str, list[dict[str, Any]]]:
+def _role_evidence(
+    method: str, data: dict[str, Any], frame_data: dict[str, Any] | None,
+    maximum: int | None = 5,
+) -> dict[str, list[dict[str, Any]]]:
     evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
     if method == "ours":
         for frame in data.get("frames", []):
@@ -251,14 +254,18 @@ def _role_evidence(method: str, data: dict[str, Any], frame_data: dict[str, Any]
                     evidence[role].append({
                         "frame_index": int(frame_index), "bbox": box, "normalized": False,
                     })
-    return {
-        role: _sample_evidence(sorted(values, key=lambda item: item["frame_index"]))
+    ordered = {
+        role: sorted(values, key=lambda item: item["frame_index"])
         for role, values in evidence.items()
     }
+    if maximum is None:
+        return ordered
+    return {role: _sample_evidence(values, maximum) for role, values in ordered.items()}
 
 
 def load_method_output(
-    method: str, root: Path, relative_path: str, frame_count: int, ontology: dict[str, str]
+    method: str, root: Path, relative_path: str, frame_count: int, ontology: dict[str, str],
+    evidence_limit: int | None = 5,
 ) -> dict[str, Any] | None:
     paths = method_paths(root, method, relative_path)
     if not paths["graph"].exists():
@@ -273,7 +280,7 @@ def load_method_output(
         normalized = normalize_svg2(data)
     collapsed = collapse_graph(normalized, ontology)
     collapsed["role_labels"] = _majority_role_labels(method, data, frame_data)
-    collapsed["role_evidence"] = _role_evidence(method, data, frame_data)
+    collapsed["role_evidence"] = _role_evidence(method, data, frame_data, evidence_limit)
     collapsed["source_path"] = str(paths["graph"])
     return collapsed
 

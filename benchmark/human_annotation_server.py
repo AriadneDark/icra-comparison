@@ -14,11 +14,13 @@ from typing import Any
 
 try:
     from .hybrid_common import (
-        ROLE_ORDER, load_json, load_ontology, resolve_study_path, scoped_artifact, write_json,
+        METHODS, ROLE_ORDER, build_candidates, load_json, load_method_output, load_ontology,
+        resolve_study_path, scoped_artifact, write_json,
     )
 except ImportError:
     from hybrid_common import (
-        ROLE_ORDER, load_json, load_ontology, resolve_study_path, scoped_artifact, write_json,
+        METHODS, ROLE_ORDER, build_candidates, load_json, load_method_output, load_ontology,
+        resolve_study_path, scoped_artifact, write_json,
     )
 
 
@@ -28,7 +30,7 @@ HTML = r"""<!doctype html>
 <style>
 body{font-family:system-ui,sans-serif;margin:0;background:#15171a;color:#eee} header{position:sticky;top:0;background:#222;padding:10px 18px;z-index:2}
 main{max-width:1200px;margin:auto;padding:16px} button,select,input,textarea{font:inherit} button{padding:7px 13px;margin:3px}
-video{width:100%;max-height:520px;background:#000}.card{background:#22262b;border-radius:8px;padding:14px;margin:12px 0}.evidence img{width:150px;margin:4px;border:1px solid #666}
+video{width:100%;max-height:520px;background:#000}.card{background:#22262b;border-radius:8px;padding:14px;margin:12px 0}.evidence{display:flex;flex-wrap:wrap;gap:6px}.evidence figure{margin:4px;text-align:center}.evidence img{display:block;width:150px;border:1px solid #666}.evidence figcaption{color:#aaa;font:12px system-ui,sans-serif}
 table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #444;padding:7px;text-align:left;vertical-align:top}
 input[type=text]{width:95%;padding:5px;background:#111;color:#eee;border:1px solid #555}textarea{width:98%;min-height:90px;background:#111;color:#eee}
 .goal{font-size:1.1rem;color:#ffe08a}.muted{color:#aaa}.yes{color:#8ee28e}.no{color:#ff9696}.uncertain{color:#ffd27a}
@@ -52,7 +54,7 @@ async function init(){tasks=await (await fetch('/api/tasks')).json();document.ge
 function esc(x){return String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 async function load(i){if(i<0||i>=tasks.length)return;current=i;task=await (await fetch('/api/task?index='+i)).json();idx.value=i+1;title.textContent=task.relative_path+' ['+task.evaluation_split+']';goal.textContent='Goal: '+task.planning_goal;video.src='/media/video?index='+i;
  let a=task.annotation||{}, gr=a.roles||{};rolesBody='';for(const r of roles){const v=gr[r]||{};rolesBody+=`<tr><td>${r}</td><td><input id="role_${r}_label" type="text" value="${esc(v.label||'')}"></td><td><select id="role_${r}_status">${['present','not_visible','not_applicable','ambiguous'].map(x=>`<option ${v.status===x?'selected':''}>${x}</option>`)}</select></td><td><input id="role_${r}_intervals" type="text" placeholder="0-29" value="${esc(formatIntervals(v.visible_intervals||[]))}"></td></tr>`}document.getElementById('roles').innerHTML=rolesBody;
- let labels=a.claim_labels||{}, roleRows='', relationRows='';for(const f of task.facts){let d=f.kind==='role'?`${f.role} is “${f.label}”`:`${f.subject} --${f.predicate}--> ${f.object}`;let v=labels[f.id]||{};let pics=f.kind==='role'?(f.evidence_boxes||[]).map(e=>`<img loading="lazy" src="/media/evidence?index=${i}&claim_id=${encodeURIComponent(f.id)}&frame=${e.frame_index}">`).join(''):'';let row=`<tr><td class="fact">${esc(d)}<div class="muted">${f.id}</div><div class="evidence">${pics}</div></td><td>${['yes','no','uncertain'].map(x=>`<label class="${x}"><input type="radio" name="claim_${f.id}" value="${x}" ${v.label===x?'checked':''}>${x}</label><br>`).join('')}</td><td><input id="interval_${f.id}" type="text" value="${esc(formatIntervals(v.intervals||f.suggested_intervals||[]))}"></td></tr>`;if(f.kind==='role')roleRows+=row;else relationRows+=row}document.getElementById('roleFacts').innerHTML=roleRows||'<tr><td colspan="3" class="muted">No candidate role tracks.</td></tr>';document.getElementById('relationFacts').innerHTML=relationRows||'<tr><td colspan="3" class="muted">No candidate relations.</td></tr>';
+ let labels=a.claim_labels||{}, roleRows='', relationRows='';for(const f of task.facts){let d=f.kind==='role'?`${f.role} is “${f.label}”`:`${f.subject} --${f.predicate}--> ${f.object}`;let v=labels[f.id]||{};let evidence=f.evidence_boxes||[];let pics=f.kind==='role'?evidence.map(e=>`<figure><img loading="lazy" src="/media/evidence?index=${i}&claim_id=${encodeURIComponent(f.id)}&frame=${e.frame_index}"><figcaption>frame ${e.frame_index}</figcaption></figure>`).join(''):'';if(f.kind==='role'&&!evidence.length)pics='<div class="muted">Semantic proposal only — no detector track or box. Judge whether this role identification exists in the video.</div>';let row=`<tr><td class="fact">${esc(d)}<div class="muted">${f.id}</div><div class="evidence">${pics}</div></td><td>${['yes','no','uncertain'].map(x=>`<label class="${x}"><input type="radio" name="claim_${f.id}" value="${x}" ${v.label===x?'checked':''}>${x}</label><br>`).join('')}</td><td><input id="interval_${f.id}" type="text" value="${esc(formatIntervals(v.intervals||f.suggested_intervals||[]))}"></td></tr>`;if(f.kind==='role')roleRows+=row;else relationRows+=row}document.getElementById('roleFacts').innerHTML=roleRows||'<tr><td colspan="3" class="muted">No candidate role tracks.</td></tr>';document.getElementById('relationFacts').innerHTML=relationRows||'<tr><td colspan="3" class="muted">No candidate relations.</td></tr>';
  missing.value=(a.missing_relations||[]).map(x=>`${x.subject} | ${x.predicate} | ${x.object} | ${formatIntervals(x.intervals||[])}`).join('\n');notes.value=a.notes||'';complete.checked=!!a.complete;status.textContent=a.complete?'✓ complete':'not saved/unfinished'}
 function formatIntervals(xs){return xs.map(x=>x[0]+'-'+x[1]).join(',')}
 function parseIntervals(text){if(!text.trim())return[];return text.split(',').map(x=>{let p=x.trim().split('-').map(Number);if(p.length!==2||p.some(Number.isNaN))throw Error('Bad interval: '+x);return [Math.min(...p),Math.max(...p)]})}
@@ -73,6 +75,19 @@ class AnnotationApp:
         self.annotator = annotator
         study = load_json(self.study_root / "study_manifest.json")
         self.ontology = load_ontology(resolve_study_path(self.study_root, study["ontology"]))
+        configured_roots = {
+            method: Path(study.get("roots", {}).get(method, "")) for method in METHODS
+        }
+        container_roots = {
+            "ours": self.source_root.parent,
+            "sg_ego": self.study_root.parent / "sg_ego",
+            "svg2": self.study_root.parent / "svg2",
+        }
+        self.method_roots = {
+            method: root if root.exists() else container_roots[method]
+            for method, root in configured_roots.items()
+        }
+        self._full_evidence_cache: dict[str, dict[str, list[dict[str, Any]]]] = {}
         self.records = [
             record for record in study["episodes"]
             if record["evaluation_split"].startswith("human_")
@@ -91,9 +106,12 @@ class AnnotationApp:
             else load_json(self.study_root / record["candidate_path"]),
             self.ontology,
         )
+        evidence_by_id = self.full_role_evidence(record)
         blind = []
         for fact in source["facts"]:
             item = {key: value for key, value in fact.items() if key not in {"sources", "source_intervals"}}
+            if item.get("kind") == "role" and item["id"] in evidence_by_id:
+                item["evidence_boxes"] = evidence_by_id[item["id"]]
             intervals = sorted({
                 tuple(interval) for values in fact.get("source_intervals", {}).values()
                 for interval in values if len(interval) == 2
@@ -101,6 +119,24 @@ class AnnotationApp:
             item["suggested_intervals"] = [list(value) for value in intervals]
             blind.append(item)
         return blind
+
+    def full_role_evidence(self, record: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+        """Reload detector outputs so human annotators can inspect every available box."""
+        video_id = record["video_id"]
+        if video_id not in self._full_evidence_cache:
+            outputs = {
+                method: load_method_output(
+                    method, self.method_roots[method], record["relative_path"],
+                    int(record["frame_count"]), self.ontology, evidence_limit=None,
+                )
+                for method in METHODS
+            }
+            candidates = build_candidates(outputs)
+            self._full_evidence_cache[video_id] = {
+                fact["id"]: fact.get("evidence_boxes", [])
+                for fact in candidates["facts"] if fact.get("kind") == "role"
+            }
+        return self._full_evidence_cache[video_id]
 
     def source_facts(self, record: dict[str, Any]) -> list[dict[str, Any]]:
         vlm_path = self.study_root / "vlm" / f"{record['video_id']}.json"
@@ -116,7 +152,7 @@ class AnnotationApp:
         from PIL import Image, ImageDraw
 
         record = self.records[index]
-        fact = next((item for item in self.source_facts(record) if item["id"] == claim_id), None)
+        fact = next((item for item in self.facts(record) if item["id"] == claim_id), None)
         if fact is None or fact.get("kind") != "role":
             raise ValueError("Unknown role claim")
         evidence = next(
