@@ -13,6 +13,14 @@ The VLM is also run on the human subset. Those overlapping decisions estimate
 `P(human true | VLM verdict, fact type)`, which is then used instead of treating
 raw VLM confidence as calibrated probability.
 
+Because SG-Ego does not predict action edges, cross-method relation metrics use
+only state/spatial predicates. Dynamic predicates listed in
+`predicate_ontology.json::_exclude_predicates` are excluded symmetrically from
+OUR, SG-Ego, SVG2, the VLM candidate view, calibration, PPI, and final metrics.
+`holding` remains in scope as a state relation. Existing VLM artifacts created
+with the broader prompt are filtered at read time and do not need inference
+again.
+
 ## 1. Configure the 1,000-video run
 
 The three methods must have finished on the same manifest. Point the Docker

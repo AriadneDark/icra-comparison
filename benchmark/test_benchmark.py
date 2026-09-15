@@ -3,7 +3,8 @@ import unittest
 from evaluate import compare_episode
 from hybrid_common import (
     build_candidates, canonical_predicate, collapse_graph, frames_from_intervals,
-    intervals_from_frames, load_ontology, resolve_study_path,
+    intervals_from_frames, load_ontology, ontology_predicates, resolve_study_path,
+    scoped_artifact,
 )
 from normalize import normalize_ours, normalize_sgego, normalize_svg2
 from prepare_hybrid_evaluation import proportional_stratified_sample
@@ -151,6 +152,8 @@ class HybridEvaluationTests(unittest.TestCase):
         ontology = load_ontology("predicate_ontology.json")
         self.assertEqual(canonical_predicate("Pick up", ontology), "holding")
         self.assertEqual(canonical_predicate("move cup to plate", ontology), "")
+        self.assertEqual(canonical_predicate("reaching for", ontology), "")
+        self.assertNotIn("moving", ontology_predicates(ontology))
         graph = {"frame_count": 1, "frames": [{
             "frame_index": 0, "nodes": ["robot", "manipulated_object"],
             "edges": [
@@ -163,6 +166,24 @@ class HybridEvaluationTests(unittest.TestCase):
             "subject": "robot", "predicate": "holding", "object": "manipulated_object",
             "intervals": [[0, 0]],
         }])
+
+    def test_existing_vlm_artifact_is_filtered_to_state_relations(self):
+        ontology = load_ontology("predicate_ontology.json")
+        payload = {
+            "facts": [
+                {"id": "state", "kind": "relation", "predicate": "on"},
+                {"id": "action", "kind": "relation", "predicate": "placing"},
+                {"id": "role", "kind": "role", "role": "robot"},
+            ],
+            "verdicts": [
+                {"claim_id": "state"}, {"claim_id": "action"}, {"claim_id": "role"},
+            ],
+        }
+        filtered = scoped_artifact(payload, ontology)
+        self.assertEqual({fact["id"] for fact in filtered["facts"]}, {"state", "role"})
+        self.assertEqual(
+            {verdict["claim_id"] for verdict in filtered["verdicts"]}, {"state", "role"}
+        )
 
     def test_local_judge_endpoint_needs_no_real_api_key(self):
         self.assertTrue(is_local_endpoint("http://gemma-judge:8000/v1"))

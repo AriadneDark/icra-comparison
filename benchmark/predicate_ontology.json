@@ -1,5 +1,10 @@
 {
   "_drop_unknown": true,
+  "_exclude_predicates": [
+    "approaching", "moving_away", "reaching_for", "placing", "placing_on",
+    "placing_in", "removing_from", "releasing", "pouring", "opening",
+    "closing", "pushing", "moving"
+  ],
   "holding": [
     "hold", "holds", "grasp", "grasps", "grasping", "grips", "gripping",
     "grab", "grabs", "grabbing", "pick", "picks", "picking", "pick up",

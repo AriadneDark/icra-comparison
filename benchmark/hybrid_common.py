@@ -19,6 +19,7 @@ except ImportError:
 ROLE_ORDER = ("robot", "manipulated_object", "initial_support", "target")
 METHODS = ("ours", "sg_ego", "svg2")
 STRICT_ONTOLOGY_KEY = "\0drop_unknown"
+EXCLUDED_PREDICATE_PREFIX = "\0exclude:"
 
 
 def load_json(path: str | Path) -> Any:
@@ -64,6 +65,11 @@ def load_ontology(path: str | Path | None) -> dict[str, str]:
         raise ValueError("Predicate ontology must be a JSON object")
     if payload.get("_drop_unknown") is True:
         aliases[STRICT_ONTOLOGY_KEY] = "true"
+    excluded = payload.get("_exclude_predicates", [])
+    if not isinstance(excluded, list):
+        raise ValueError("_exclude_predicates must be a list")
+    for value in excluded:
+        aliases[EXCLUDED_PREDICATE_PREFIX + normalize_text(value)] = "true"
     for canonical, values in payload.items():
         if canonical.startswith("_"):
             continue
@@ -78,13 +84,37 @@ def load_ontology(path: str | Path | None) -> dict[str, str]:
 def canonical_predicate(value: str, ontology: dict[str, str]) -> str:
     normalized = normalize_text(value)
     if normalized in ontology:
-        return ontology[normalized]
+        canonical = ontology[normalized]
+        if ontology.get(EXCLUDED_PREDICATE_PREFIX + canonical) == "true":
+            return ""
+        return canonical
     return "" if ontology.get(STRICT_ONTOLOGY_KEY) == "true" else normalized
 
 
 def ontology_predicates(ontology: dict[str, str]) -> list[str]:
     """Return the closed set of canonical predicates exposed to the judge."""
-    return sorted({value for key, value in ontology.items() if key != STRICT_ONTOLOGY_KEY})
+    return sorted({
+        value for key, value in ontology.items()
+        if not key.startswith("\0")
+        and ontology.get(EXCLUDED_PREDICATE_PREFIX + value) != "true"
+    })
+
+
+def scoped_artifact(payload: dict[str, Any], ontology: dict[str, str]) -> dict[str, Any]:
+    """Filter an existing VLM/candidate artifact to the frozen relation scope."""
+    facts = [
+        fact for fact in payload.get("facts", [])
+        if fact.get("kind") != "relation"
+        or bool(canonical_predicate(str(fact.get("predicate") or ""), ontology))
+    ]
+    identifiers = {fact.get("id") for fact in facts}
+    result = {**payload, "facts": facts}
+    if "verdicts" in payload:
+        result["verdicts"] = [
+            verdict for verdict in payload.get("verdicts", [])
+            if verdict.get("claim_id") in identifiers
+        ]
+    return result
 
 
 def intervals_from_frames(frame_ids: Iterable[int]) -> list[list[int]]:

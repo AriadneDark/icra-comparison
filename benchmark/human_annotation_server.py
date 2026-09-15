@@ -13,9 +13,13 @@ from urllib.parse import parse_qs, urlparse
 from typing import Any
 
 try:
-    from .hybrid_common import ROLE_ORDER, load_json, write_json
+    from .hybrid_common import (
+        ROLE_ORDER, load_json, load_ontology, resolve_study_path, scoped_artifact, write_json,
+    )
 except ImportError:
-    from hybrid_common import ROLE_ORDER, load_json, write_json
+    from hybrid_common import (
+        ROLE_ORDER, load_json, load_ontology, resolve_study_path, scoped_artifact, write_json,
+    )
 
 
 HTML = r"""<!doctype html>
@@ -67,6 +71,7 @@ class AnnotationApp:
         self.source_root = source_root.resolve()
         self.annotator = annotator
         study = load_json(self.study_root / "study_manifest.json")
+        self.ontology = load_ontology(resolve_study_path(self.study_root, study["ontology"]))
         self.records = [
             record for record in study["episodes"]
             if record["evaluation_split"].startswith("human_")
@@ -80,7 +85,11 @@ class AnnotationApp:
 
     def facts(self, record: dict[str, Any]) -> list[dict[str, Any]]:
         vlm_path = self.study_root / "vlm" / f"{record['video_id']}.json"
-        source = load_json(vlm_path) if vlm_path.exists() else load_json(self.study_root / record["candidate_path"])
+        source = scoped_artifact(
+            load_json(vlm_path) if vlm_path.exists()
+            else load_json(self.study_root / record["candidate_path"]),
+            self.ontology,
+        )
         blind = []
         for fact in source["facts"]:
             item = {key: value for key, value in fact.items() if key not in {"sources", "source_intervals"}}
@@ -94,7 +103,11 @@ class AnnotationApp:
 
     def source_facts(self, record: dict[str, Any]) -> list[dict[str, Any]]:
         vlm_path = self.study_root / "vlm" / f"{record['video_id']}.json"
-        source = load_json(vlm_path) if vlm_path.exists() else load_json(self.study_root / record["candidate_path"])
+        source = scoped_artifact(
+            load_json(vlm_path) if vlm_path.exists()
+            else load_json(self.study_root / record["candidate_path"]),
+            self.ontology,
+        )
         return source["facts"]
 
     def evidence_image(self, index: int, claim_id: str, frame_index: int) -> bytes:

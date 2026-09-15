@@ -267,6 +267,10 @@ docker compose --env-file benchmark/docker.env \
 Считаются micro/macro precision, recall и F1 отдельно для role nodes и
 направленных `(subject, predicate, object)` triplets.
 
+Для сравнения трёх методов учитываются только state/spatial triplets, поскольку
+SG-Ego не выдаёт action edges. Динамические отношения симметрично исключаются у
+OUR, SG-Ego, SVG2 и VLM judge; `holding` сохраняется как состояние.
+
 ### Гибридная оценка 1000 видео
 
 Предлагаемый протокол:

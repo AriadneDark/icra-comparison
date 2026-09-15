@@ -13,12 +13,12 @@ from typing import Any
 try:
     from .hybrid_common import (
         METHODS, ROLE_ORDER, canonical_predicate, frames_from_intervals,
-        load_json, load_ontology, resolve_study_path, write_json,
+        load_json, load_ontology, resolve_study_path, scoped_artifact, write_json,
     )
 except ImportError:
     from hybrid_common import (
         METHODS, ROLE_ORDER, canonical_predicate, frames_from_intervals,
-        load_json, load_ontology, resolve_study_path, write_json,
+        load_json, load_ontology, resolve_study_path, scoped_artifact, write_json,
     )
 
 
@@ -102,7 +102,8 @@ def human_episode_counts(
 
 
 def calibration_table(
-    records: list[dict[str, Any]], study_root: Path, annotation_root: Path
+    records: list[dict[str, Any]], study_root: Path, annotation_root: Path,
+    ontology: dict[str, str],
 ) -> tuple[dict[str, dict[str, dict[str, float]]], dict[str, Any]]:
     counts: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0])
     confusion: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -113,7 +114,8 @@ def calibration_table(
         vlm_path = study_root / "vlm" / f"{record['video_id']}.json"
         if not annotation_path.exists() or not vlm_path.exists():
             continue
-        annotation, vlm = load_json(annotation_path), load_json(vlm_path)
+        annotation = load_json(annotation_path)
+        vlm = scoped_artifact(load_json(vlm_path), ontology)
         if not annotation.get("complete"):
             continue
         fact_by_id = {fact["id"]: fact for fact in vlm["facts"]}
@@ -478,7 +480,7 @@ def main() -> None:
     ontology = load_ontology(resolve_study_path(study_root, study["ontology"]))
     annotation_root = study_root / "human_annotations" / args.annotator
     records = study["episodes"]
-    calibration, confusion = calibration_table(records, study_root, annotation_root)
+    calibration, confusion = calibration_table(records, study_root, annotation_root, ontology)
 
     human_per_video: dict[str, dict[str, list[tuple[float, float, float]]]] = {
         split: {f"{method}_{kind}": [] for method in METHODS for kind in ("roles", "relations")}
@@ -504,7 +506,8 @@ def main() -> None:
         vlm_path = study_root / "vlm" / f"{record['video_id']}.json"
         if not annotation_path.exists() or not vlm_path.exists():
             continue
-        annotation, vlm = load_json(annotation_path), load_json(vlm_path)
+        annotation = load_json(annotation_path)
+        vlm = scoped_artifact(load_json(vlm_path), ontology)
         if not annotation.get("complete"):
             continue
         complete_human += 1
@@ -598,7 +601,7 @@ def main() -> None:
         path = study_root / "vlm" / f"{record['video_id']}.json"
         if not path.exists():
             continue
-        vlm = load_json(path)
+        vlm = scoped_artifact(load_json(path), ontology)
         sampled_frames = vlm.get("verifier_frame_indices", [])
         if vlm.get("schema_version") != "hybrid_vlm_assessment_v2" or not sampled_frames:
             continue
@@ -630,7 +633,7 @@ def main() -> None:
         path = study_root / "vlm" / f"{record['video_id']}.json"
         if not path.exists():
             continue
-        vlm = load_json(path)
+        vlm = scoped_artifact(load_json(path), ontology)
         if vlm.get("schema_version") != "hybrid_vlm_assessment_v2" or not vlm.get("verifier_frame_indices"):
             continue
         ppi_pseudo_counts[record["video_id"]] = raw_judge_counts(vlm)
