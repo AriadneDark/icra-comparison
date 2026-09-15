@@ -53,9 +53,16 @@ def materialize_scene(source: Path, target: Path) -> None:
             link_or_copy(path, target / name)
     if not (target / "input.json").exists() or not (target / "task_spec.json").exists():
         raise FileNotFoundError(f"Missing frozen prepare/Qwen artifacts in {source}")
-    frames = sorted((source / "frames").glob("*.png"))
+    # The exported 1000-video dataset keeps prepared RGB frames in ``images``;
+    # older pipeline runs used ``frames``. Accept both layouts and materialize
+    # the canonical ``frames`` directory expected by the segmentation runner.
+    frame_root = source / "frames"
+    frames = sorted(frame_root.glob("*.png"))
     if not frames:
-        raise FileNotFoundError(f"No prepared frames in {source / 'frames'}")
+        frame_root = source / "images"
+        frames = sorted(frame_root.glob("*.png"))
+    if not frames:
+        raise FileNotFoundError(f"No prepared frames in {source / 'frames'} or {source / 'images'}")
     for frame in frames:
         link_or_copy(frame, target / "frames" / frame.name)
 
