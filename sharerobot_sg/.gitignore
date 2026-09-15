@@ -5,6 +5,8 @@ __pycache__/
 
 sam3.pt
 data/
+!unified_scene_graph_pipeline/third_party/sam3/sam3/train/data/
+!unified_scene_graph_pipeline/third_party/sam3/sam3/train/data/**
 paper/
 report/
 legacy_code/
